@@ -123,6 +123,12 @@ const TOOL_SVGS := {
 		<path d="M12 2.5V5.5M12 18.5V21.5M2.5 12H5.5M18.5 12H21.5" stroke="#D97706" stroke-width="2.6" stroke-linecap="round"/>
 	</svg>""",
 
+	"studio_bg": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+		<rect x="3" y="4" width="18" height="16" rx="4" fill="#BAE6FD" stroke="#0284C7" stroke-width="2.2"/>
+		<circle cx="8.5" cy="9.5" r="2" fill="#FDE047" stroke="#CA8A04" stroke-width="1.4"/>
+		<path d="M4.2 17L9.2 12.2C9.8 11.6 10.8 11.6 11.4 12.2L14 14.8L16.2 12.8C16.8 12.2 17.8 12.2 18.4 12.8L19.8 14.2V17.5C19.8 18.6 18.9 19.5 17.8 19.5H6.2C5.1 19.5 4.2 18.6 4.2 17.5V17Z" fill="#6EE7B7" stroke="#059669" stroke-width="1.8" stroke-linejoin="round"/>
+	</svg>""",
+
 	"mode_character": """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
 		<circle cx="6.5" cy="7" r="3" fill="#FDBA74" stroke="#C2410C" stroke-width="2"/>
 		<circle cx="17.5" cy="7" r="3" fill="#FDBA74" stroke="#C2410C" stroke-width="2"/>

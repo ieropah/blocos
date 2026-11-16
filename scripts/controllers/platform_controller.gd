@@ -47,6 +47,7 @@ var _default_environment: Environment = null
 var _has_captured_default_env: bool = false
 var _voxel_environment: Environment = null
 var _solid_environment: Environment = null
+var _studio_bg_color: Color = Color("#5CC2F2")
 var _target_dir_light: DirectionalLight3D = null
 var _owned_dir_light: DirectionalLight3D = null
 var _has_captured_default_light: bool = false
@@ -178,7 +179,7 @@ func build_platform(board_size: int = _DEFAULT_VISUAL_GRID_SIZE) -> void:
 	_floor_instance.mesh = floor_mesh
 	_floor_instance.material_override = _floor_mat
 	_floor_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	_floor_instance.position = Vector3.ZERO
+	_floor_instance.position = Vector3(0.0, -0.002, 0.0)
 	add_child(_floor_instance)
 
 	var board_mesh := PlaneMesh.new()
@@ -260,6 +261,17 @@ func get_board_size() -> int:
 	return _board_size
 
 
+func set_studio_bg_color(bg_color: Color) -> void:
+	_studio_bg_color = bg_color
+	if current_theme_id == "solid":
+		_apply_theme_materials()
+		_apply_theme_environment()
+
+
+func get_studio_bg_color() -> Color:
+	return _studio_bg_color
+
+
 func get_tile_position(grid_x: int, grid_z: int) -> Vector3:
 	var unit_footprint := Vector3(PieceCatalog.GRID_UNIT_SIZE, _DOT_HEIGHT, PieceCatalog.GRID_UNIT_SIZE)
 	var pos := PieceCatalog.grid_to_piece_center_base(
@@ -279,8 +291,8 @@ func _apply_theme_materials() -> void:
 	var floor_col: Color = ThemeVisuals.STUDIO_BLUE
 	var board_col: Color = ThemeVisuals.STUDIO_BLUE.lightened(0.06)
 	if is_solid:
-		floor_col = Color("#08C6F7")
-		board_col = Color("#08C6F7")
+		floor_col = _studio_bg_color
+		board_col = _studio_bg_color
 	elif current_theme_id == "wood":
 		floor_col = Color("#B57B4C")
 		board_col = Color("#C88E5E")
@@ -289,7 +301,9 @@ func _apply_theme_materials() -> void:
 
 	if _floor_mat != null:
 		_floor_mat.albedo_color = floor_col
+		_floor_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if is_solid else BaseMaterial3D.SHADING_MODE_PER_PIXEL
 		_floor_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED if is_solid else BaseMaterial3D.SPECULAR_SCHLICK_GGX
+		_floor_mat.disable_receive_shadows = is_solid
 	if _floor_instance != null and is_instance_valid(_floor_instance):
 		_floor_instance.visible = not is_voxel
 
@@ -302,17 +316,25 @@ func _apply_theme_materials() -> void:
 			_board_mat.uv1_scale = Vector3(float(_board_size), float(_board_size), 1.0)
 			_board_mat.roughness = 0.88
 			_board_mat.metallic_specular = 0.1
+			_board_mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
 			_board_mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+			_board_mat.disable_receive_shadows = false
 		else:
 			_board_mat.albedo_texture = null
 			_board_mat.albedo_color = board_col
 			_board_mat.uv1_scale = Vector3.ONE
 			_board_mat.roughness = 0.95 if is_solid else 0.92
 			_board_mat.metallic_specular = 0.0 if is_solid else 0.06
+			_board_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED if is_solid else BaseMaterial3D.SHADING_MODE_PER_PIXEL
 			_board_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED if is_solid else BaseMaterial3D.SPECULAR_SCHLICK_GGX
+			_board_mat.disable_receive_shadows = is_solid
 
 	if _dot_mat != null:
-		_dot_mat.albedo_color = Color(0.02, 0.616, 0.769, 0.72) if is_solid else Color(1.0, 1.0, 1.0, 0.16)
+		if is_solid:
+			var solid_dot_col: Color = _studio_bg_color.darkened(0.15)
+			_dot_mat.albedo_color = Color(solid_dot_col.r, solid_dot_col.g, solid_dot_col.b, 0.72)
+		else:
+			_dot_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.16)
 
 	if _dots_mmi != null and is_instance_valid(_dots_mmi):
 		_dots_mmi.visible = not is_voxel
@@ -835,12 +857,21 @@ func _apply_theme_environment() -> void:
 		if _solid_environment == null:
 			_solid_environment = Environment.new()
 			_solid_environment.background_mode = Environment.BG_COLOR
-			_solid_environment.background_color = Color("#08C6F7")
 			_solid_environment.fog_enabled = false
 			_solid_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-			_solid_environment.ambient_light_color = Color("#48D9FF")
 			_solid_environment.ambient_light_energy = 0.55
+		_solid_environment.background_mode = Environment.BG_COLOR
+		_solid_environment.background_color = _studio_bg_color
+		_solid_environment.ambient_light_color = _studio_bg_color.lightened(0.25)
 		world_env.environment = _solid_environment
+		RenderingServer.set_default_clear_color(_studio_bg_color)
+		if is_inside_tree():
+			var vp := get_viewport()
+			if vp != null:
+				var cam := vp.get_camera_3d()
+				if cam != null and cam.environment != null:
+					cam.environment.background_mode = Environment.BG_COLOR
+					cam.environment.background_color = _studio_bg_color
 	else:
 		world_env.environment = _default_environment
 	_apply_theme_lighting()

@@ -107,6 +107,7 @@ func ensure_setup() -> void:
 	_platform.build_platform(ProjectData.DEFAULT_GRID_SIZE)
 	if _platform.has_method("set_theme"):
 		_platform.call("set_theme", ProjectData.DEFAULT_THEME_ID)
+	_sync_solid_platform_visibility(ProjectData.DEFAULT_THEME_ID)
 
 	_pieces_root = Node3D.new()
 	_pieces_root.name = "PiecesRoot"
@@ -920,9 +921,41 @@ func _apply_workspace_rules(p_grid_size: int, p_theme_id: String) -> void:
 			_platform.call("set_grid_size", p_grid_size)
 		if _platform.has_method("set_theme"):
 			_platform.call("set_theme", p_theme_id)
+		_sync_solid_platform_visibility(p_theme_id)
 	if _camera_controller != null and is_instance_valid(_camera_controller) and _camera_controller.has_method("adapt_to_grid_size"):
 		_camera_controller.call("adapt_to_grid_size", p_grid_size)
 	_sync_ui_theme_context(p_grid_size, p_theme_id)
+
+
+## Updates both the WorldEnvironment background and the infinite studio floor to the same solid color.
+func set_studio_background_color(bg_color: Color) -> void:
+	if _platform != null and is_instance_valid(_platform):
+		if _platform.has_method("set_studio_bg_color"):
+			_platform.call("set_studio_bg_color", bg_color)
+		var floor_node := _platform.get_node_or_null("StudioFloor") as MeshInstance3D
+		if floor_node != null and floor_node.material_override is StandardMaterial3D:
+			(floor_node.material_override as StandardMaterial3D).albedo_color = bg_color
+	if _world_env != null and is_instance_valid(_world_env) and _world_env.environment != null:
+		_world_env.environment.background_mode = Environment.BG_COLOR
+		_world_env.environment.background_color = bg_color
+	if _camera_controller != null and is_instance_valid(_camera_controller):
+		var cam: Camera3D = _camera_controller.get_camera()
+		if cam != null and cam.environment != null:
+			cam.environment.background_mode = Environment.BG_COLOR
+			cam.environment.background_color = bg_color
+	RenderingServer.set_default_clear_color(bg_color)
+
+
+func _sync_solid_platform_visibility(p_theme_id: String) -> void:
+	if _platform == null or not is_instance_valid(_platform):
+		return
+	var is_solid: bool = (p_theme_id == "solid")
+	var mode_stage := _platform.get_node_or_null("ModeStageDecor") as Node3D
+	if mode_stage != null:
+		mode_stage.visible = not is_solid
+	var board_surface := _platform.get_node_or_null("BoardSurface") as MeshInstance3D
+	if board_surface != null:
+		board_surface.visible = not is_solid
 
 
 func _sync_ui_theme_context(p_grid_size: int, p_theme_id: String) -> void:

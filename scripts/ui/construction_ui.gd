@@ -23,20 +23,32 @@ signal home_pressed
 signal home_requested
 signal theme_cycle_requested(theme_id: String)
 signal tool_selected(tool_name: String)
+signal studio_bg_changed(bg_color: Color)
 
 const CameraController = preload("res://scripts/controllers/camera_controller.gd")
 const ThemeVisuals = preload("res://scripts/visuals/theme_visuals.gd")
 const UiIconDrawer = preload("res://scripts/visuals/ui_icon_drawer.gd")
 
-const TRAY_WIDTH_PX := 206.0
+const TRAY_WIDTH_PX := 160.0
+const TRAY_HEIGHT_PX := 656.0
 const TOOLBAR_SAFE_MARGIN := 24
-const BUTTON_MIN_SIZE := Vector2(56.0, 56.0)
-const EDITING_BUTTON_MIN_SIZE := Vector2(56.0, 56.0)
-const BUTTON_CORNER_RADIUS := 18
-const TRAY_CORNER_RADIUS := 20
+const BUTTON_MIN_SIZE := Vector2(96.0, 96.0)
+const EDITING_BUTTON_MIN_SIZE := Vector2(96.0, 96.0)
+const PALETTE_HEIGHT_PX := 70.0
+const STUDIO_BG_BUTTON_SIZE := Vector2(54.0, 54.0)
+const STUDIO_BG_COLORS: Array[Color] = [
+	Color("#5CC2F2"),
+	Color("#F3E6D3"),
+	Color("#A8E6CF"),
+	Color("#D4C4FB"),
+	Color("#FFD3B6"),
+	Color("#DCE4EC"),
+]
+const BUTTON_CORNER_RADIUS := 22
+const TRAY_CORNER_RADIUS := 28
 const CARD_CORNER_RADIUS := 18
-const SWATCH_CORNER_RADIUS := 14
-const PALETTE_CONTAINER_CORNER_RADIUS := 24
+const SWATCH_CORNER_RADIUS := 22
+const PALETTE_CONTAINER_CORNER_RADIUS := 35
 const ICON_BADGE_CORNER_RADIUS := 16
 const ZOOM_BUTTON_STEP := 1.25
 const THEME_CYCLE_ORDER: Array[String] = ["plastic", "voxel", "wood"]
@@ -76,6 +88,7 @@ const COLOR_OPTIONS: Array[Dictionary] = [
 	{"id": "bubblegum_pink", "name": "Rosa Chiclete", "color": Color("#F15BB5")},
 	{"id": "warm_brown", "name": "Marrom", "color": Color("#A1623B")},
 	{"id": "cream_white", "name": "Branco", "color": Color("#F8FAFC")},
+	{"id": "obsidian_black", "name": "Preto", "color": Color("#111111")},
 ]
 
 const PREVIEW_PIECES: Array[Dictionary] = [
@@ -157,6 +170,9 @@ var _drawer_assembly: HBoxContainer = null
 var _tray_panel: PanelContainer = null
 var _category_tabs_container: VBoxContainer = null
 var _palette_container: PanelContainer = null
+var _studio_bg_button: Button = null
+var _studio_bg_divider: ColorRect = null
+var _studio_bg_index: int = 0
 var _cards_box: GridContainer = null
 var _top_bar_panel: PanelContainer = null
 var _gallery_button: Button = null
@@ -313,6 +329,12 @@ func set_active_theme(theme_id: String, catalog_pieces: Array = [], grid_size: i
 	_refresh_category_tabs(false)
 	_rebuild_tray_cards()
 	_refresh_palette_visibility()
+	if _studio_bg_button != null and is_instance_valid(_studio_bg_button):
+		_studio_bg_button.visible = (_active_theme_id == "solid")
+	if _studio_bg_divider != null and is_instance_valid(_studio_bg_divider):
+		_studio_bg_divider.visible = (_active_theme_id == "solid")
+	if _active_theme_id == "solid":
+		_apply_studio_bg_to_platform(STUDIO_BG_COLORS[_studio_bg_index])
 
 
 func _rebuild_tray_cards() -> void:
@@ -546,7 +568,11 @@ func set_piece_selected_state(is_selected: bool) -> void:
 			var btn := _editing_buttons[btn_name] as Button
 			if btn != null and is_instance_valid(btn):
 				btn.disabled = not is_selected
-				btn.modulate.a = 1.0 if is_selected else 0.45
+				btn.modulate.a = 1.0
+		if _button_icons.has(btn_name):
+			var icon := _button_icons[btn_name] as TextureRect
+			if icon != null and is_instance_valid(icon):
+				icon.modulate.a = 1.0 if is_selected else 0.55
 
 
 ## Enables or disables the Undo and Redo buttons based on history availability.
@@ -556,12 +582,20 @@ func set_history_state(can_undo: bool, can_redo: bool) -> void:
 		var undo_btn := _editing_buttons["UndoButton"] as Button
 		if undo_btn != null and is_instance_valid(undo_btn):
 			undo_btn.disabled = not can_undo
-			undo_btn.modulate.a = 1.0 if can_undo else 0.45
+			undo_btn.modulate.a = 1.0
+		if _button_icons.has("UndoButton"):
+			var undo_icon := _button_icons["UndoButton"] as TextureRect
+			if undo_icon != null and is_instance_valid(undo_icon):
+				undo_icon.modulate.a = 1.0 if can_undo else 0.55
 	if _editing_buttons.has("RedoButton"):
 		var redo_btn := _editing_buttons["RedoButton"] as Button
 		if redo_btn != null and is_instance_valid(redo_btn):
 			redo_btn.disabled = not can_redo
-			redo_btn.modulate.a = 1.0 if can_redo else 0.45
+			redo_btn.modulate.a = 1.0
+		if _button_icons.has("RedoButton"):
+			var redo_icon := _button_icons["RedoButton"] as TextureRect
+			if redo_icon != null and is_instance_valid(redo_icon):
+				redo_icon.modulate.a = 1.0 if can_redo else 0.55
 
 
 ## Updates the active project title shown beside the Projects button.
@@ -587,6 +621,13 @@ func get_gallery_button() -> Button:
 func is_screen_point_over_ui(screen_pos: Vector2) -> bool:
 	ensure_setup()
 	if is_screen_point_in_tray(screen_pos):
+		return true
+	if (
+		_studio_bg_button != null
+		and is_instance_valid(_studio_bg_button)
+		and _studio_bg_button.visible
+		and _studio_bg_button.get_global_rect().has_point(screen_pos)
+	):
 		return true
 	for panel: PanelContainer in [_palette_container, _top_bar_panel, _tool_toolbar_panel, _editing_toolbar_panel, _toolbar_panel]:
 		if (
@@ -614,19 +655,19 @@ func _build_tray_panel(parent: Control) -> void:
 	_drawer_assembly.name = "LeftDrawerAssembly"
 	_drawer_assembly.anchor_left = 0.0
 	_drawer_assembly.anchor_right = 0.0
-	_drawer_assembly.anchor_top = 0.0
-	_drawer_assembly.anchor_bottom = 1.0
+	_drawer_assembly.anchor_top = 0.5
+	_drawer_assembly.anchor_bottom = 0.5
 	_drawer_assembly.offset_left = 16.0
-	_drawer_assembly.offset_top = 16.0
+	_drawer_assembly.offset_top = -TRAY_HEIGHT_PX * 0.5
 	_drawer_assembly.offset_right = 16.0 + TRAY_WIDTH_PX + 72.0
-	_drawer_assembly.offset_bottom = -16.0
+	_drawer_assembly.offset_bottom = TRAY_HEIGHT_PX * 0.5
 	_drawer_assembly.add_theme_constant_override("separation", 0)
 	_drawer_assembly.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(_drawer_assembly)
 
 	_tray_panel = PanelContainer.new()
 	_tray_panel.name = "TrayPanel"
-	_tray_panel.custom_minimum_size = Vector2(TRAY_WIDTH_PX, 0.0)
+	_tray_panel.custom_minimum_size = Vector2(TRAY_WIDTH_PX, TRAY_HEIGHT_PX)
 	_tray_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_tray_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	_tray_panel.add_theme_stylebox_override("panel", _make_tray_style())
@@ -635,10 +676,10 @@ func _build_tray_panel(parent: Control) -> void:
 	var margin := MarginContainer.new()
 	margin.name = "TrayMargin"
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_top", 12)
-	margin.add_theme_constant_override("margin_bottom", 12)
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_bottom", 16)
 	_tray_panel.add_child(margin)
 
 	var column := VBoxContainer.new()
@@ -648,59 +689,6 @@ func _build_tray_panel(parent: Control) -> void:
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_theme_constant_override("separation", 12)
 	margin.add_child(column)
-
-	var header_row := HBoxContainer.new()
-	header_row.name = "DrawerHeaderRow"
-	header_row.alignment = BoxContainer.ALIGNMENT_BEGIN
-	header_row.add_theme_constant_override("separation", 8)
-	header_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(header_row)
-
-	_home_button = Button.new()
-	_home_button.name = "HomeButton"
-	_home_button.text = ""
-	_home_button.tooltip_text = "Voltar para a tela inicial (toque 2x)"
-	_home_button.custom_minimum_size = Vector2(56.0, 56.0)
-	_home_button.pivot_offset = Vector2(28.0, 28.0)
-	_home_button.mouse_filter = Control.MOUSE_FILTER_STOP
-	_home_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	_home_button.add_theme_stylebox_override("normal", _make_toy_button_style(COLOR_BUTTON_NORMAL, COLOR_BUTTON_BORDER, false, 2))
-	_home_button.add_theme_stylebox_override("hover", _make_toy_button_style(COLOR_BUTTON_HOVER, COLOR_BUTTON_BORDER_ACTIVE, false, 2))
-	_home_button.add_theme_stylebox_override("pressed", _make_toy_button_style(COLOR_BUTTON_PRESSED, COLOR_BUTTON_BORDER_ACTIVE, true, 2))
-	_home_button.add_theme_stylebox_override("focus", _make_toy_button_style(COLOR_BUTTON_HOVER, COLOR_BUTTON_BORDER_ACTIVE, false, 2))
-	var back_icon := _attach_hud_icon(_home_button, "back_arrow")
-	_button_icons["HomeButton"] = back_icon
-	_home_button.pressed.connect(_on_home_button_pressed)
-	header_row.add_child(_home_button)
-
-	_home_confirm_badge = PanelContainer.new()
-	_home_confirm_badge.name = "HomeConfirmBadge"
-	_home_confirm_badge.visible = false
-	_home_confirm_badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_home_confirm_badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var badge_style := StyleBoxFlat.new()
-	badge_style.bg_color = Color("#FEE2E2")
-	badge_style.border_color = Color("#EF4444")
-	badge_style.set_border_width_all(2)
-	badge_style.set_corner_radius_all(12)
-	badge_style.content_margin_left = 10
-	badge_style.content_margin_right = 10
-	badge_style.content_margin_top = 4
-	badge_style.content_margin_bottom = 4
-	_home_confirm_badge.add_theme_stylebox_override("panel", badge_style)
-	var badge_label := Label.new()
-	badge_label.text = "Sair?"
-	badge_label.add_theme_font_size_override("font_size", 16)
-	badge_label.add_theme_color_override("font_color", Color("#B91C1C"))
-	badge_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_home_confirm_badge.add_child(badge_label)
-	header_row.add_child(_home_confirm_badge)
-
-	var header_spacer := Control.new()
-	header_spacer.name = "HeaderCardsSpacer"
-	header_spacer.custom_minimum_size = Vector2(0.0, 4.0)
-	header_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(header_spacer)
 
 	var scroll := ScrollContainer.new()
 	scroll.name = "PreviewScroll"
@@ -713,11 +701,11 @@ func _build_tray_panel(parent: Control) -> void:
 
 	_cards_box = GridContainer.new()
 	_cards_box.name = "PreviewCards"
-	_cards_box.columns = 2
-	_cards_box.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_cards_box.columns = 1
+	_cards_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_cards_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_cards_box.add_theme_constant_override("h_separation", 10)
-	_cards_box.add_theme_constant_override("v_separation", 10)
+	_cards_box.add_theme_constant_override("v_separation", 12)
 	scroll.add_child(_cards_box)
 
 	var tabs_margin := MarginContainer.new()
@@ -878,6 +866,15 @@ func _make_binder_tab_style(bg_color: Color, border_color: Color, is_pressed: bo
 
 
 func _refresh_category_tabs(animate: bool = false) -> void:
+	var show_tabs: bool = (_active_theme_id != "solid")
+	if _category_tabs_container != null and is_instance_valid(_category_tabs_container):
+		_category_tabs_container.visible = show_tabs
+		var tabs_parent := _category_tabs_container.get_parent() as Control
+		if tabs_parent != null:
+			tabs_parent.visible = show_tabs
+	if not show_tabs:
+		return
+
 	if animate and is_inside_tree() and _tab_tween != null and _tab_tween.is_valid():
 		_tab_tween.kill()
 	if animate and is_inside_tree():
@@ -914,8 +911,8 @@ func _create_preview_card(piece: Dictionary) -> PanelContainer:
 	var piece_name: String = piece["name"]
 
 	card.name = piece_name.replace(" ", "") + "Card"
-	card.custom_minimum_size = Vector2(84.0, 84.0)
-	card.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	card.custom_minimum_size = Vector2(124.0, 108.0)
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	card.set_meta("piece_id", piece_id)
@@ -928,12 +925,26 @@ func _create_preview_card(piece: Dictionary) -> PanelContainer:
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(row)
 
+	var png_path: String = "res://assets/icons/%s.png" % piece_id
+	if ResourceLoader.exists(png_path):
+		var png_tex := load(png_path) as Texture2D
+		if png_tex != null:
+			var tex_icon := TextureRect.new()
+			tex_icon.name = "PieceIcon"
+			tex_icon.texture = png_tex
+			tex_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			tex_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			tex_icon.custom_minimum_size = Vector2(84.0, 84.0)
+			tex_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			row.add_child(tex_icon)
+			return card
+
 	var icon := ShapeIcon.new()
 	icon.name = "ShapeIcon"
 	icon.shape_id = piece_id
 	icon.fill_color = _selected_color
 	icon.active_theme_id = _active_theme_id
-	icon.custom_minimum_size = Vector2(68.0, 68.0)
+	icon.custom_minimum_size = Vector2(84.0, 84.0)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(icon)
 	_shape_icons[piece_id] = icon
@@ -1019,6 +1030,10 @@ func _build_toolbar_panel(parent: Control) -> void:
 	layout_col.add_theme_constant_override("separation", 12)
 	toolbar_area.add_child(layout_col)
 
+	# Zone 1: Top-Right Tools (Row 1: Eraser + Paint, Row 2: Undo below Paint)
+	var top_right_tools := _create_top_right_tools_panel()
+	layout_col.add_child(top_right_tools)
+
 	var vertical_spacer := Control.new()
 	vertical_spacer.name = "ToolbarVerticalSpacer"
 	vertical_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1030,12 +1045,13 @@ func _build_toolbar_panel(parent: Control) -> void:
 	bottom_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bottom_row.size_flags_vertical = Control.SIZE_SHRINK_END
 	bottom_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	bottom_row.add_theme_constant_override("separation", 14)
+	bottom_row.add_theme_constant_override("separation", 12)
 	layout_col.add_child(bottom_row)
 
-	# Zone 2: Bottom Color Bar (12 Glossy Paint Dots)
+	# Zone 2: Bottom Color Bar (70px height pill) with Studio Background Cycle Button inside
 	_palette_container = PanelContainer.new()
 	_palette_container.name = "ColorPaletteContainer"
+	_palette_container.custom_minimum_size = Vector2(0.0, PALETTE_HEIGHT_PX)
 	_palette_container.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_palette_container.size_flags_vertical = Control.SIZE_SHRINK_END
 	_palette_container.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -1045,9 +1061,22 @@ func _build_toolbar_panel(parent: Control) -> void:
 	var color_row := HBoxContainer.new()
 	color_row.name = "ColorRow"
 	color_row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	color_row.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	color_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	color_row.add_theme_constant_override("separation", 8)
 	_palette_container.add_child(color_row)
+
+	_studio_bg_button = _create_studio_bg_button()
+	color_row.add_child(_studio_bg_button)
+
+	_studio_bg_divider = ColorRect.new()
+	_studio_bg_divider.name = "StudioBgDivider"
+	_studio_bg_divider.custom_minimum_size = Vector2(2.0, 36.0)
+	_studio_bg_divider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_studio_bg_divider.color = COLOR_TRAY_BORDER
+	_studio_bg_divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_studio_bg_divider.visible = (_active_theme_id == "solid")
+	color_row.add_child(_studio_bg_divider)
 
 	_color_buttons.clear()
 	for entry: Dictionary in COLOR_OPTIONS:
@@ -1065,12 +1094,11 @@ func _build_toolbar_panel(parent: Control) -> void:
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bottom_row.add_child(spacer)
 
-	# Zone 3: Bottom-Right Action Bar (Rotate, Trash, Undo, Redo)
+	# Zone 3: Bottom-Right Action Bar (3 loose 96x96 buttons: Camera/Rotate, Trash, Home)
 	var editing_specs: Array[Dictionary] = [
-		{"name": "RotatePieceButton", "icon": "rotate_piece", "tooltip": "Girar bloco selecionado 90 graus", "signal": rotate_piece_pressed, "disabled": true},
-		{"name": "DeletePieceButton", "icon": "delete_piece", "tooltip": "Apagar bloco selecionado", "signal": delete_piece_pressed, "disabled": true},
-		{"name": "UndoButton", "icon": "undo", "tooltip": "Desfazer última ação", "signal": undo_pressed, "disabled": true},
-		{"name": "RedoButton", "icon": "redo", "tooltip": "Refazer última ação", "signal": redo_pressed, "disabled": true},
+		{"name": "RotatePieceButton", "icon": "camera_toggle", "fallback": "rotate_piece", "tooltip": "", "signal": rotate_piece_pressed, "disabled": false},
+		{"name": "DeletePieceButton", "icon": "clear_all", "fallback": "delete_piece", "tooltip": "", "signal": delete_piece_pressed, "disabled": true},
+		{"name": "HomeButton", "icon": "home", "fallback": "home", "tooltip": "", "signal": home_pressed, "disabled": false},
 	]
 	_editing_buttons.clear()
 	_editing_toolbar_panel = _create_toolbar_panel(
@@ -1080,8 +1108,84 @@ func _build_toolbar_panel(parent: Control) -> void:
 		EDITING_BUTTON_MIN_SIZE,
 		_editing_buttons
 	)
+	_editing_toolbar_panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	if _editing_buttons.has("HomeButton"):
+		_home_button = _editing_buttons["HomeButton"] as Button
 	_editing_toolbar_panel.size_flags_horizontal = Control.SIZE_SHRINK_END
 	bottom_row.add_child(_editing_toolbar_panel)
+
+
+func _create_top_right_tools_panel() -> VBoxContainer:
+	var container := VBoxContainer.new()
+	container.name = "TopRightToolsContainer"
+	container.size_flags_horizontal = Control.SIZE_SHRINK_END
+	container.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.add_theme_constant_override("separation", 12)
+
+	var row1 := HBoxContainer.new()
+	row1.name = "TopRightToolsRow1"
+	row1.alignment = BoxContainer.ALIGNMENT_END
+	row1.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row1.add_theme_constant_override("separation", 12)
+	container.add_child(row1)
+
+	var tool_specs: Array[Dictionary] = [
+		{"id": "erase", "name": "EraseToolButton", "icon": "eraser", "fallback": "erase"},
+		{"id": "paint", "name": "PaintToolButton", "icon": "quick_paint", "fallback": "paint"},
+	]
+
+	_tool_buttons.clear()
+	_paint_tool_icon = null
+	for spec: Dictionary in tool_specs:
+		var tool_id: String = str(spec["id"])
+		var btn := Button.new()
+		btn.name = str(spec["name"])
+		btn.text = ""
+		btn.expand_icon = true
+		btn.custom_minimum_size = BUTTON_MIN_SIZE
+		btn.pivot_offset = BUTTON_MIN_SIZE * 0.5
+		btn.mouse_filter = Control.MOUSE_FILTER_STOP
+		btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		btn.pressed.connect(func() -> void: select_tool(tool_id))
+
+		var icon := _attach_hud_icon(btn, str(spec["icon"]), str(spec["fallback"]))
+		if tool_id == "paint":
+			_paint_tool_icon = icon
+
+		row1.add_child(btn)
+		_tool_buttons[tool_id] = btn
+
+	var row2 := HBoxContainer.new()
+	row2.name = "TopRightToolsRow2"
+	row2.alignment = BoxContainer.ALIGNMENT_END
+	row2.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.add_child(row2)
+
+	var undo_btn := Button.new()
+	undo_btn.name = "UndoButton"
+	undo_btn.text = ""
+	undo_btn.expand_icon = true
+	undo_btn.custom_minimum_size = BUTTON_MIN_SIZE
+	undo_btn.pivot_offset = BUTTON_MIN_SIZE * 0.5
+	undo_btn.disabled = true
+	undo_btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	undo_btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	var undo_style := _make_toy_button_style(COLOR_BUTTON_NORMAL, COLOR_BUTTON_BORDER, false, 2)
+	undo_btn.add_theme_stylebox_override("normal", undo_style)
+	undo_btn.add_theme_stylebox_override("hover", _make_toy_button_style(COLOR_BUTTON_HOVER, COLOR_BUTTON_BORDER_ACTIVE, false, 2))
+	undo_btn.add_theme_stylebox_override("pressed", _make_toy_button_style(COLOR_BUTTON_PRESSED, COLOR_BUTTON_BORDER_ACTIVE, true, 2))
+	undo_btn.add_theme_stylebox_override("disabled", undo_style)
+	undo_btn.add_theme_stylebox_override("focus", _make_toy_button_style(COLOR_BUTTON_HOVER, COLOR_BUTTON_BORDER_ACTIVE, false, 2))
+	var undo_icon := _attach_hud_icon(undo_btn, "undo", "undo")
+	undo_icon.modulate.a = 0.55
+	_button_icons["UndoButton"] = undo_icon
+	undo_btn.pressed.connect(func() -> void: undo_pressed.emit())
+	row2.add_child(undo_btn)
+	_editing_buttons["UndoButton"] = undo_btn
+
+	_refresh_tool_buttons()
+	return container
 
 
 func _create_top_bar_panel() -> PanelContainer:
@@ -1248,7 +1352,8 @@ func _create_toolbar_panel(
 			spec["tooltip"],
 			spec["signal"],
 			min_button_size,
-			bool(spec.get("disabled", false))
+			bool(spec.get("disabled", false)),
+			str(spec.get("fallback", ""))
 		)
 		row.add_child(btn)
 		target_map[spec["name"]] = btn
@@ -1262,7 +1367,8 @@ func _create_toolbar_button(
 	tooltip: String,
 	target_signal: Signal,
 	min_size: Vector2 = BUTTON_MIN_SIZE,
-	initially_disabled: bool = false
+	initially_disabled: bool = false,
+	fallback_type: String = ""
 ) -> Button:
 	var btn := Button.new()
 	btn.name = button_name
@@ -1278,23 +1384,99 @@ func _create_toolbar_button(
 	var hover_style := _make_toy_button_style(COLOR_BUTTON_HOVER, COLOR_BUTTON_BORDER_ACTIVE, false, 2)
 	var pressed_style := _make_toy_button_style(COLOR_BUTTON_PRESSED, COLOR_BUTTON_BORDER_ACTIVE, true, 2)
 	var focus_style := _make_toy_button_style(COLOR_BUTTON_HOVER, COLOR_BUTTON_BORDER_ACTIVE, false, 2)
-	var disabled_style := _make_toy_button_style(COLOR_BUTTON_DISABLED, COLOR_BUTTON_BORDER_DISABLED, false, 2)
 
 	btn.add_theme_stylebox_override("normal", normal_style)
 	btn.add_theme_stylebox_override("hover", hover_style)
 	btn.add_theme_stylebox_override("pressed", pressed_style)
 	btn.add_theme_stylebox_override("focus", focus_style)
-	btn.add_theme_stylebox_override("disabled", disabled_style)
-	btn.modulate.a = 0.45 if initially_disabled else 1.0
+	btn.add_theme_stylebox_override("disabled", normal_style)
+	btn.modulate.a = 1.0
 
-	var icon := _attach_hud_icon(btn, icon_type)
+	var icon := _attach_hud_icon(btn, icon_type, fallback_type)
+	icon.modulate.a = 0.55 if initially_disabled else 1.0
 	_button_icons[button_name] = icon
 
 	btn.pressed.connect(func() -> void: target_signal.emit())
 	return btn
 
 
-func _attach_hud_icon(btn: Button, icon_type: String) -> TextureRect:
+func _create_studio_bg_button() -> Button:
+	var btn := Button.new()
+	btn.name = "StudioBgButton"
+	btn.text = ""
+	btn.custom_minimum_size = STUDIO_BG_BUTTON_SIZE
+	btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	btn.mouse_filter = Control.MOUSE_FILTER_STOP
+	btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	btn.visible = (_active_theme_id == "solid")
+
+	var icon := _attach_hud_icon(btn, "studio_bg", "studio_bg")
+	icon.custom_minimum_size = Vector2(34.0, 34.0)
+	_button_icons["StudioBgButton"] = icon
+
+	_studio_bg_button = btn
+	_update_studio_bg_button_visual()
+	btn.pressed.connect(_on_studio_bg_button_pressed)
+	return btn
+
+
+func _update_studio_bg_button_visual() -> void:
+	if _studio_bg_button == null or not is_instance_valid(_studio_bg_button):
+		return
+	var next_idx: int = (_studio_bg_index + 1) % STUDIO_BG_COLORS.size()
+	var preview_col: Color = STUDIO_BG_COLORS[next_idx]
+	var normal_style := _make_toy_button_style(preview_col, Color("#FFFFFF"), false, 3)
+	normal_style.set_corner_radius_all(16)
+	var hover_style := _make_toy_button_style(preview_col.lightened(0.06), Color("#FFBE0B"), false, 3)
+	hover_style.set_corner_radius_all(16)
+	var pressed_style := _make_toy_button_style(preview_col.darkened(0.06), Color("#FFBE0B"), true, 3)
+	pressed_style.set_corner_radius_all(16)
+
+	_studio_bg_button.add_theme_stylebox_override("normal", normal_style)
+	_studio_bg_button.add_theme_stylebox_override("hover", hover_style)
+	_studio_bg_button.add_theme_stylebox_override("pressed", pressed_style)
+	_studio_bg_button.add_theme_stylebox_override("focus", hover_style)
+	_studio_bg_button.add_theme_stylebox_override("disabled", normal_style)
+
+
+func _on_studio_bg_button_pressed() -> void:
+	_studio_bg_index = (_studio_bg_index + 1) % STUDIO_BG_COLORS.size()
+	var bg_color: Color = STUDIO_BG_COLORS[_studio_bg_index]
+	_update_studio_bg_button_visual()
+	_apply_studio_bg_to_platform(bg_color)
+	studio_bg_changed.emit(bg_color)
+
+
+func _apply_studio_bg_to_platform(bg_color: Color) -> void:
+	if not is_inside_tree():
+		return
+	var tree := get_tree()
+	if tree == null or tree.root == null:
+		return
+	_propagate_studio_bg(tree.root, bg_color)
+
+
+func _propagate_studio_bg(node: Node, bg_color: Color) -> void:
+	if node.has_method("set_studio_background_color"):
+		node.call("set_studio_background_color", bg_color)
+	elif node.has_method("set_studio_bg_color"):
+		node.call("set_studio_bg_color", bg_color)
+	for child: Node in node.get_children():
+		_propagate_studio_bg(child, bg_color)
+
+
+func _load_icon_texture(icon_key: String, fallback_type: String = "") -> Texture2D:
+	var png_path: String = "res://assets/icons/%s.png" % icon_key
+	if ResourceLoader.exists(png_path):
+		var loaded := load(png_path) as Texture2D
+		if loaded != null:
+			return loaded
+	var drawer_key: String = fallback_type if not fallback_type.is_empty() else icon_key
+	return UiIconDrawer.get_icon_texture(drawer_key, _selected_color)
+
+
+func _attach_hud_icon(btn: Button, icon_type: String, fallback_type: String = "") -> TextureRect:
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1302,10 +1484,10 @@ func _attach_hud_icon(btn: Button, icon_type: String) -> TextureRect:
 
 	var icon := TextureRect.new()
 	icon.name = "HudIcon"
-	icon.texture = UiIconDrawer.get_icon_texture(icon_type, _selected_color)
+	icon.texture = _load_icon_texture(icon_type, fallback_type)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.custom_minimum_size = Vector2(36.0, 36.0)
+	icon.custom_minimum_size = Vector2(52.0, 52.0)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	center.add_child(icon)
 	return icon
@@ -1333,8 +1515,8 @@ func _make_palette_container_style() -> StyleBoxFlat:
 	style.set_corner_radius_all(PALETTE_CONTAINER_CORNER_RADIUS)
 	style.content_margin_left = 14
 	style.content_margin_right = 14
-	style.content_margin_top = 10
-	style.content_margin_bottom = 10
+	style.content_margin_top = 8
+	style.content_margin_bottom = 8
 	style.shadow_color = COLOR_SHADOW
 	style.shadow_size = 10
 	style.shadow_offset = Vector2(0, 4)
