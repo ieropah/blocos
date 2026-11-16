@@ -10,7 +10,9 @@ const DEFAULT_GRID_SIZE: int = 8
 const LEGACY_GRID_SIZE: int = 12
 const VALID_GRID_SIZES: Array[int] = [8, 12, 16, 32]
 const DEFAULT_THEME_ID: String = "plastic"
-const VALID_THEMES: Array[String] = ["plastic", "voxel", "wood"]
+const VALID_THEMES: Array[String] = ["plastic", "voxel", "solid", "wood"]
+const DEFAULT_MODE_ID: String = "scenery"
+const VALID_MODES: Array[String] = ["character", "animal", "vehicle", "scenery"]
 
 var project_id: String = ""
 var project_name: String = ""
@@ -20,6 +22,7 @@ var modified_at: int = 0
 var grid_size: int = DEFAULT_GRID_SIZE
 var board_size: int = DEFAULT_GRID_SIZE
 var theme_id: String = DEFAULT_THEME_ID
+var mode_id: String = DEFAULT_MODE_ID
 var pieces: Array[Dictionary] = []
 
 
@@ -31,7 +34,8 @@ func _init(
 	p_modified_at: int = 0,
 	p_version: int = CURRENT_FORMAT_VERSION,
 	p_grid_size: int = DEFAULT_GRID_SIZE,
-	p_theme_id: String = DEFAULT_THEME_ID
+	p_theme_id: String = DEFAULT_THEME_ID,
+	p_mode_id: String = DEFAULT_MODE_ID
 ) -> void:
 	project_id = p_id
 	project_name = p_name
@@ -41,6 +45,7 @@ func _init(
 	grid_size = normalize_grid_size(p_grid_size)
 	board_size = grid_size
 	theme_id = normalize_theme_id(p_theme_id)
+	mode_id = normalize_mode_id(p_mode_id)
 	set_pieces_from_placed_data(p_pieces)
 
 
@@ -60,6 +65,14 @@ static func is_valid_theme_id(p_theme_id: String) -> bool:
 
 static func normalize_theme_id(p_theme_id: String) -> String:
 	return p_theme_id if p_theme_id in VALID_THEMES else DEFAULT_THEME_ID
+
+
+static func is_valid_mode_id(p_mode_id: String) -> bool:
+	return p_mode_id in VALID_MODES
+
+
+static func normalize_mode_id(p_mode_id: String) -> String:
+	return p_mode_id if p_mode_id in VALID_MODES else DEFAULT_MODE_ID
 
 
 func get_piece_count() -> int:
@@ -101,5 +114,6 @@ func duplicate_data() -> ProjectData:
 		modified_at,
 		format_version,
 		grid_size,
-		theme_id
+		theme_id,
+		mode_id
 	)

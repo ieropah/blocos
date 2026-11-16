@@ -7,6 +7,8 @@ const ProjectRepository = preload("res://scripts/core/project_repository.gd")
 const ConstructionManager = preload("res://scripts/core/construction_manager.gd")
 const PieceCatalog = preload("res://scripts/core/piece_catalog.gd")
 
+const SAVING_ENABLED: bool = false
+
 signal project_created(project: ProjectData)
 signal project_loaded(project: ProjectData)
 signal project_saved(project_id: String)
@@ -24,6 +26,10 @@ var _is_restoring: bool = false
 var _last_error: Dictionary = {}
 
 
+func _init() -> void:
+	purge_all_saved_projects()
+
+
 func _exit_tree() -> void:
 	_disconnect_manager()
 
@@ -31,6 +37,43 @@ func _exit_tree() -> void:
 func setup(storage_dir: String = ProjectRepository.DEFAULT_STORAGE_DIR) -> void:
 	_repository.set_storage_dir(storage_dir)
 	_repository.ensure_storage_dir()
+	purge_all_saved_projects()
+
+
+func purge_all_saved_projects() -> void:
+	_current_project = null
+	_last_error.clear()
+	var target_dirs: Array[String] = ["user://", _repository.get_storage_dir(), "user://saves", "user://gallery"]
+	var visited: Dictionary = {}
+	for dir_path: String in target_dirs:
+		if dir_path.is_empty():
+			continue
+		var abs_path: String = ProjectSettings.globalize_path(dir_path)
+		if visited.has(abs_path):
+			continue
+		visited[abs_path] = true
+		_purge_directory_recursive(abs_path)
+
+
+func _purge_directory_recursive(abs_dir_path: String) -> void:
+	if not DirAccess.dir_exists_absolute(abs_dir_path):
+		return
+	var dir := DirAccess.open(abs_dir_path)
+	if dir == null:
+		return
+	dir.list_dir_begin()
+	var entry: String = dir.get_next()
+	while not entry.is_empty():
+		if entry != "." and entry != "..":
+			var full_path: String = abs_dir_path.path_join(entry)
+			if dir.current_is_dir():
+				_purge_directory_recursive(full_path)
+			else:
+				var ext: String = entry.get_extension().to_lower()
+				if ext in ["json", "blocos", "tres", "png"]:
+					DirAccess.remove_absolute(full_path)
+		entry = dir.get_next()
+	dir.list_dir_end()
 
 
 func set_storage_dir(storage_dir: String) -> void:
@@ -86,13 +129,20 @@ func get_last_error() -> Dictionary:
 
 
 func list_projects() -> Array[ProjectData]:
+	if not SAVING_ENABLED:
+		return []
 	return _repository.list_projects()
+
+
+func get_saved_projects() -> Array[ProjectData]:
+	return list_projects()
 
 
 func create_project(
 	custom_name: String = "",
 	p_grid_size: int = -1,
-	p_theme_id: String = ""
+	p_theme_id: String = "",
+	p_mode_id: String = ""
 ) -> Dictionary:
 	_repository.ensure_storage_dir()
 	var trimmed_name: String = custom_name.strip_edges()
@@ -122,6 +172,20 @@ func create_project(
 		)
 	)
 
+	var resolved_mode_id: String = (
+		p_mode_id
+		if ProjectData.is_valid_mode_id(p_mode_id)
+		else (
+			"character"
+			if resolved_grid_size == 8
+			else (
+				"vehicle"
+				if resolved_grid_size == 12
+				else ProjectData.DEFAULT_MODE_ID
+			)
+		)
+	)
+
 	var new_project := ProjectData.new(
 		project_id,
 		final_name,
@@ -130,12 +194,14 @@ func create_project(
 		now_sec,
 		ProjectData.CURRENT_FORMAT_VERSION,
 		resolved_grid_size,
-		resolved_theme_id
+		resolved_theme_id,
+		resolved_mode_id
 	)
-	var save_res: Dictionary = _repository.save_project(new_project)
-	if not bool(save_res.get("success", false)):
-		_record_error(save_res)
-		return save_res
+	if SAVING_ENABLED:
+		var save_res: Dictionary = _repository.save_project(new_project)
+		if not bool(save_res.get("success", false)):
+			_record_error(save_res)
+			return save_res
 
 	if _bound_manager != null and is_instance_valid(_bound_manager):
 		_is_restoring = true
@@ -206,7 +272,31 @@ func open_project(project_id: String, manager: ConstructionManager = null) -> Di
 	}
 
 
+func save_project(_project: ProjectData = null) -> Error:
+	if not SAVING_ENABLED:
+		return OK
+	var target: ProjectData = _project if _project != null else _current_project
+	if target == null:
+		return ERR_UNAVAILABLE
+	var res: Dictionary = _repository.save_project(target)
+	return OK if bool(res.get("success", false)) else ERR_CANT_CREATE
+
+
+func auto_save() -> Error:
+	if not SAVING_ENABLED:
+		return OK
+	_trigger_autosave()
+	return OK
+
+
 func save_current_project(pieces_override: Variant = null) -> Dictionary:
+	if not SAVING_ENABLED:
+		return {
+			"success": true,
+			"reason": "saving_disabled",
+			"error_message": "",
+			"project_id": get_current_project_id(),
+		}
 	if _current_project == null:
 		return {
 			"success": false,
@@ -325,6 +415,8 @@ func _on_manager_cleared() -> void:
 
 
 func _trigger_autosave() -> void:
+	if not SAVING_ENABLED:
+		return
 	if _autosave_enabled and not _is_restoring and _current_project != null:
 		save_current_project()
 

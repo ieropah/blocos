@@ -38,6 +38,7 @@ static func to_dictionary(project: ProjectData) -> Dictionary:
 		"grid_size": project.grid_size,
 		"board_size": project.grid_size,
 		"theme_id": project.theme_id,
+		"mode_id": project.mode_id,
 		"pieces": serialized_pieces,
 	}
 
@@ -117,6 +118,15 @@ static func from_dictionary(raw_data: Variant) -> Dictionary:
 			return _make_error("invalid_theme_id", "Could not open project: unsupported theme.")
 		theme_id = parsed_theme
 
+	var mode_id: String = "character" if grid_size == 8 else "scenery"
+	if data.has("mode_id"):
+		if not (data["mode_id"] is String):
+			return _make_error("invalid_mode_id", "Could not open project: invalid mode.")
+		var parsed_mode: String = str(data["mode_id"]).strip_edges()
+		if not ProjectData.is_valid_mode_id(parsed_mode):
+			return _make_error("invalid_mode_id", "Could not open project: unsupported mode.")
+		mode_id = parsed_mode
+
 	var raw_pieces: Variant = data.get("pieces", null)
 	if not (raw_pieces is Array):
 		return _make_error("invalid_pieces_list", "Could not open project: invalid pieces list.")
@@ -190,7 +200,8 @@ static func from_dictionary(raw_data: Variant) -> Dictionary:
 		modified_at,
 		version_num,
 		grid_size,
-		theme_id
+		theme_id,
+		mode_id
 	)
 	return {
 		"success": true,

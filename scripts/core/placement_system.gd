@@ -21,7 +21,12 @@ func set_grid_size(new_size: int) -> void:
 
 
 func set_theme_rules(theme_id: String) -> void:
-	y_step = 1.0 if theme_id == "voxel" else 0.25
+	if theme_id == "voxel":
+		y_step = 1.0
+	elif theme_id == "solid":
+		y_step = 0.5
+	else:
+		y_step = 0.25
 
 
 func world_to_grid(world_pos: Vector3, p_grid_size: int = -1) -> Vector3i:

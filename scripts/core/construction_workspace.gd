@@ -319,12 +319,20 @@ func close_gallery() -> void:
 		_camera_controller.is_interaction_locked = false
 
 
+static func get_mode_preset(mode_id: String, theme_id: String = "plastic") -> Dictionary:
+	return PieceCatalog.get_mode_preset(mode_id, theme_id)
+
+
 func create_new_project(
 	custom_name: String = "",
 	p_grid_size: int = -1,
-	p_theme_id: String = ""
+	p_theme_id: String = "",
+	p_mode_id: String = ""
 ) -> Dictionary:
 	ensure_setup()
+	if ProjectData.is_valid_mode_id(p_mode_id) and p_grid_size <= 0:
+		var preset: Dictionary = PieceCatalog.get_mode_preset(p_mode_id, p_theme_id)
+		p_grid_size = int(preset["grid_size"])
 	if p_theme_id == "voxel" and p_grid_size >= 16:
 		p_grid_size = 32
 	if _interaction_controller != null:
@@ -332,7 +340,7 @@ func create_new_project(
 			_interaction_controller.cancel_drag()
 		_interaction_controller.clear_selection()
 	_suppress_feedback_fx = true
-	var res: Dictionary = _save_manager.create_project(custom_name, p_grid_size, p_theme_id)
+	var res: Dictionary = _save_manager.create_project(custom_name, p_grid_size, p_theme_id, p_mode_id)
 	_suppress_feedback_fx = false
 	if bool(res.get("success", false)):
 		_gallery_ui.clear_error()
@@ -902,7 +910,7 @@ func _apply_workspace_rules(p_grid_size: int, p_theme_id: String) -> void:
 			_interaction_controller.set("board_size", p_grid_size)
 		elif "_board_size" in _interaction_controller:
 			_interaction_controller.set("_board_size", p_grid_size)
-		var y_step: float = 0.5 if p_theme_id == "voxel" else PieceCatalog.HEIGHT_SUB_UNIT
+		var y_step: float = 0.5 if (p_theme_id == "voxel" or p_theme_id == "solid") else PieceCatalog.HEIGHT_SUB_UNIT
 		if _interaction_controller.has_method("set_y_step"):
 			_interaction_controller.call("set_y_step", y_step)
 		elif "y_step" in _interaction_controller:
@@ -955,6 +963,9 @@ func _on_project_activated(project: ProjectData) -> void:
 	_apply_workspace_rules(project.grid_size, project.theme_id)
 	if _ui != null and is_instance_valid(_ui):
 		_ui.set_active_project_name(project.project_name)
+		if _ui.has_method("set_mode_context"):
+			var preset: Dictionary = PieceCatalog.get_mode_preset(project.mode_id, project.theme_id)
+			_ui.call("set_mode_context", project.mode_id, str(preset.get("default_category", "building")))
 	_refresh_gallery_list()
 
 

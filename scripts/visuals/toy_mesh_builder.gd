@@ -11,13 +11,25 @@ const _VOXEL_TEX_SIZE: int = 16
 static var _texture_cache: Dictionary = {}
 static var _material_cache: Dictionary = {}
 static var _mesh_cache: Dictionary = {}
+static var _collision_shape_cache: Dictionary = {}
 
 
-## Purges all cached meshes, materials, and procedural textures to free VRAM/RAM on theme switch.
+## Purges all cached meshes, materials, collision shapes, and procedural textures to free VRAM/RAM on theme switch.
 static func clear_cache() -> void:
 	_mesh_cache.clear()
 	_material_cache.clear()
 	_texture_cache.clear()
+	_collision_shape_cache.clear()
+
+
+static func get_or_build_collision_shape(size: Vector3) -> BoxShape3D:
+	var key: String = "%.4f,%.4f,%.4f" % [size.x, size.y, size.z]
+	if _collision_shape_cache.has(key):
+		return _collision_shape_cache[key] as BoxShape3D
+	var shape := BoxShape3D.new()
+	shape.size = size
+	_collision_shape_cache[key] = shape
+	return shape
 
 
 static func is_voxel_piece(piece_type: String) -> bool:
@@ -59,7 +71,9 @@ static func create_piece_mesh(
 		return _mesh_cache[cache_key] as ArrayMesh
 
 	var mesh: ArrayMesh
-	if is_voxel_piece(piece_type):
+	if theme_id == "solid" or piece_type.begins_with("solid_"):
+		mesh = _create_solid_piece_mesh(piece_type, size)
+	elif is_voxel_piece(piece_type):
 		var tint := Color(color_hex) if not color_hex.is_empty() else Color.WHITE
 		mesh = create_voxel_box(size, piece_type, tint)
 	elif piece_type == "ramp":
@@ -76,6 +90,36 @@ static func create_piece_mesh(
 		mesh = _create_plastic_corner_block(size, bevel, segments)
 	elif piece_type == "plastic_eye":
 		mesh = _create_plastic_eye(size, bevel, segments)
+	elif piece_type == "window_block":
+		mesh = _create_plastic_window_block(size, bevel, segments)
+	elif piece_type == "door_block":
+		mesh = _create_plastic_door_block(size, bevel, segments)
+	elif piece_type == "fence_rail":
+		mesh = _create_plastic_fence_rail(size, bevel, segments)
+	elif piece_type == "plastic_mouth_smile":
+		mesh = _create_plastic_mouth_smile(size, bevel, segments)
+	elif piece_type == "plastic_snout":
+		mesh = _create_plastic_snout(size, bevel, segments)
+	elif piece_type == "plastic_ears":
+		mesh = _create_plastic_ears(size, bevel, segments)
+	elif piece_type == "plastic_paw":
+		mesh = _create_plastic_paw(size, bevel, segments)
+	elif piece_type == "plastic_crown_hat":
+		mesh = _create_plastic_crown_hat(size, bevel, segments)
+	elif piece_type == "wheel_axle":
+		mesh = _create_plastic_wheel_axle(size, bevel, segments)
+	elif piece_type == "windshield":
+		mesh = _create_plastic_windshield(size, bevel, segments)
+	elif piece_type == "headlight_bumper":
+		mesh = _create_plastic_headlight_bumper(size, bevel, segments)
+	elif piece_type == "wing_fin":
+		mesh = _create_plastic_wing_fin(size, bevel, segments)
+	elif piece_type == "steering_wheel":
+		mesh = _create_plastic_steering_wheel(size, bevel, segments)
+	elif piece_type == "propeller_block":
+		mesh = _create_plastic_propeller_block(size, bevel, segments)
+	elif piece_type == "siren_light":
+		mesh = _create_plastic_siren_light(size, bevel, segments)
 	else:
 		mesh = create_beveled_box(size, bevel, segments)
 	_mesh_cache[cache_key] = mesh
@@ -383,7 +427,12 @@ static func get_piece_material(
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(color_hex) if not color_hex.is_empty() else Color.WHITE
-	if theme_id == "wood":
+	if theme_id == "solid" or piece_id.begins_with("solid_"):
+		mat.roughness = 1.0
+		mat.metallic = 0.0
+		mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+		mat.rim_enabled = false
+	elif theme_id == "wood":
 		mat.roughness = 0.72
 		mat.metallic = 0.0
 		mat.metallic_specular = 0.15
@@ -1065,7 +1114,17 @@ static func _create_plastic_roof_gable(size: Vector3) -> ArrayMesh:
 
 
 static func _get_vertex_color_material() -> StandardMaterial3D:
-	return get_voxel_detail_material()
+	var cache_key: String = "plastic|vertex_detail"
+	if _material_cache.has(cache_key):
+		return _material_cache[cache_key] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_color = Color.WHITE
+	mat.roughness = 0.35
+	mat.metallic = 0.0
+	mat.metallic_specular = 0.45
+	_material_cache[cache_key] = mat
+	return mat
 
 
 static func _create_plastic_arch_bridge(
@@ -1170,6 +1229,570 @@ static func _create_plastic_eye(
 
 	var detail_surface := _build_colored_quad_surface(detail_quads, detail_colors)
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail_surface.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _combine_beveled_boxes(boxes: Array[Dictionary], bevel: float, segments: int) -> ArrayMesh:
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+	for box_def: Dictionary in boxes:
+		var box_size: Vector3 = box_def["size"] as Vector3
+		var box_offset: Vector3 = box_def["offset"] as Vector3
+		var part := create_beveled_box(box_size, bevel, segments)
+		_append_array_mesh_to_buffers(part, box_offset, verts, normals, uvs, indices)
+	return _build_array_mesh(verts, normals, uvs, PackedColorArray(), indices)
+
+
+static func _add_colored_quad(
+	quads: Array,
+	quad_colors: Array[Color],
+	p0: Vector3,
+	p1: Vector3,
+	p2: Vector3,
+	p3: Vector3,
+	col: Color
+) -> void:
+	var n := (p1 - p0).cross(p3 - p0).normalized()
+	if n.length_squared() < _EPSILON:
+		n = Vector3.UP
+	quads.append([p0, p1, p2, p3, n])
+	quad_colors.append(col)
+
+
+static func _add_colored_cylinder(
+	quads: Array,
+	quad_colors: Array[Color],
+	center: Vector3,
+	radius: float,
+	thickness: float,
+	axis: Vector3,
+	segs: int,
+	col: Color
+) -> void:
+	var ax := axis.normalized()
+	var u := Vector3.UP if absf(ax.dot(Vector3.UP)) < 0.9 else Vector3.RIGHT
+	var t1 := ax.cross(u).normalized()
+	var t2 := ax.cross(t1).normalized()
+	var half_t: float = thickness * 0.5
+	var c_pos := center + ax * half_t
+	var c_neg := center - ax * half_t
+
+	for i in range(segs):
+		var a0: float = TAU * float(i) / float(segs)
+		var a1: float = TAU * float(i + 1) / float(segs)
+		var r0 := (t1 * cos(a0) + t2 * sin(a0)) * radius
+		var r1 := (t1 * cos(a1) + t2 * sin(a1)) * radius
+		var p0_pos := c_pos + r0
+		var p1_pos := c_pos + r1
+		var p0_neg := c_neg + r0
+		var p1_neg := c_neg + r1
+		var side_n := ((r0 + r1) * 0.5).normalized()
+		quads.append([p0_neg, p1_neg, p1_pos, p0_pos, side_n])
+		quad_colors.append(col)
+		quads.append([c_pos, p0_pos, p1_pos, c_pos, ax])
+		quad_colors.append(col)
+		quads.append([c_neg, p1_neg, p0_neg, c_neg, -ax])
+		quad_colors.append(col)
+
+
+static func _add_colored_cone(
+	quads: Array,
+	quad_colors: Array[Color],
+	base_center: Vector3,
+	radius: float,
+	height: float,
+	axis: Vector3,
+	segs: int,
+	col: Color
+) -> void:
+	var ax := axis.normalized()
+	var u := Vector3.UP if absf(ax.dot(Vector3.UP)) < 0.9 else Vector3.RIGHT
+	var t1 := ax.cross(u).normalized()
+	var t2 := ax.cross(t1).normalized()
+	var tip := base_center + ax * height
+
+	for i in range(segs):
+		var a0: float = TAU * float(i) / float(segs)
+		var a1: float = TAU * float(i + 1) / float(segs)
+		var p0 := base_center + (t1 * cos(a0) + t2 * sin(a0)) * radius
+		var p1 := base_center + (t1 * cos(a1) + t2 * sin(a1)) * radius
+		var side_n := (p0 - base_center).cross(tip - base_center).normalized()
+		if side_n.length_squared() < _EPSILON:
+			side_n = ax
+		quads.append([p0, p1, tip, p0, side_n])
+		quad_colors.append(col)
+		quads.append([base_center, p1, p0, base_center, -ax])
+		quad_colors.append(col)
+
+
+static func _create_plastic_window_block(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var b: float = bevel * 0.55
+	var frame_t: float = 0.11 * minf(sx, sy)
+	var muntin_t: float = 0.055 * minf(sx, sy)
+	var boxes: Array[Dictionary] = [
+		{"size": Vector3(sx, frame_t, sz), "offset": Vector3(0.0, 0.0, 0.0)},
+		{"size": Vector3(sx, frame_t, sz), "offset": Vector3(0.0, sy - frame_t, 0.0)},
+		{"size": Vector3(frame_t, sy - frame_t * 2.0, sz), "offset": Vector3(-sx * 0.5 + frame_t * 0.5, frame_t, 0.0)},
+		{"size": Vector3(frame_t, sy - frame_t * 2.0, sz), "offset": Vector3(sx * 0.5 - frame_t * 0.5, frame_t, 0.0)},
+		{"size": Vector3(sx - frame_t * 2.0, muntin_t, sz * 0.72), "offset": Vector3(0.0, sy * 0.5 - muntin_t * 0.5, 0.0)},
+		{"size": Vector3(muntin_t, sy - frame_t * 2.0, sz * 0.72), "offset": Vector3(0.0, frame_t, 0.0)},
+	]
+	var mesh := ArrayMesh.new()
+	var body := _combine_beveled_boxes(boxes, b, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var glass_col := Color(0.58, 0.88, 1.0)
+	var glare_col := Color(0.96, 0.99, 1.0)
+	var gx: float = sx * 0.5 - frame_t * 0.8
+	var gy0: float = frame_t * 0.8
+	var gy1: float = sy - frame_t * 0.8
+	var gz: float = sz * 0.28
+	_add_colored_box(quads, colors, Vector3(-gx, gy0, -gz), Vector3(gx, gy1, gz), glass_col)
+	for z_sign: float in [-1.0, 1.0]:
+		var z_off: float = z_sign * (gz + 0.025)
+		_add_colored_box(quads, colors, Vector3(-gx * 0.65, gy0 + 0.14 * sy, z_off - 0.01), Vector3(-gx * 0.35, gy1 - 0.14 * sy, z_off + 0.01), glare_col)
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_door_block(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var b: float = bevel * 0.6
+	var frame_t: float = 0.13 * sx
+	var top_t: float = 0.12 * sx
+	var boxes: Array[Dictionary] = [
+		{"size": Vector3(sx, 0.06 * sy, sz), "offset": Vector3(0.0, 0.0, 0.0)},
+		{"size": Vector3(sx, top_t, sz), "offset": Vector3(0.0, sy - top_t, 0.0)},
+		{"size": Vector3(frame_t, sy - top_t, sz), "offset": Vector3(-sx * 0.5 + frame_t * 0.5, 0.0, 0.0)},
+		{"size": Vector3(frame_t, sy - top_t, sz), "offset": Vector3(sx * 0.5 - frame_t * 0.5, 0.0, 0.0)},
+	]
+	var mesh := ArrayMesh.new()
+	var body := _combine_beveled_boxes(boxes, b, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_wood := Color(0.85, 0.62, 0.38)
+	var c_inset := Color(0.72, 0.48, 0.26)
+	var c_knob := Color(1.0, 0.82, 0.18)
+	var dx: float = sx * 0.5 - frame_t * 0.88
+	var dy0: float = 0.04 * sy
+	var dy1: float = sy - top_t * 0.85
+	var dz: float = sz * 0.28
+	_add_colored_box(quads, colors, Vector3(-dx, dy0, -dz), Vector3(dx, dy1, dz), c_wood)
+
+	for z_sign: float in [-1.0, 1.0]:
+		var z_face: float = z_sign * (dz + 0.025)
+		_add_colored_box(quads, colors, Vector3(-dx * 0.68, dy0 + 0.10 * sy, z_face - 0.015), Vector3(dx * 0.68, dy0 + 0.38 * sy, z_face + 0.015), c_inset)
+		_add_colored_box(quads, colors, Vector3(-dx * 0.68, dy0 + 0.48 * sy, z_face - 0.015), Vector3(dx * 0.68, dy1 - 0.10 * sy, z_face + 0.015), c_inset)
+		_add_colored_cylinder(quads, colors, Vector3(dx * 0.62, sy * 0.46, z_sign * (dz + 0.055)), 0.065 * sx, 0.06, Vector3(0.0, 0.0, 1.0), 10, c_knob)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_fence_rail(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var b: float = bevel * 0.55
+	var post_w: float = minf(0.22 * sx, 0.22)
+	var post_d: float = minf(sz * 0.38, 0.32)
+	var rail_h: float = 0.14 * sy
+	var rail_d: float = post_d * 0.66
+	var post_x: float = sx * 0.36
+	var boxes: Array[Dictionary] = [
+		{"size": Vector3(post_w, sy, post_d), "offset": Vector3(-post_x, 0.0, 0.0)},
+		{"size": Vector3(post_w, sy, post_d), "offset": Vector3(post_x, 0.0, 0.0)},
+		{"size": Vector3(post_x * 2.0, rail_h, rail_d), "offset": Vector3(0.0, 0.28 * sy, 0.0)},
+		{"size": Vector3(post_x * 2.0, rail_h, rail_d), "offset": Vector3(0.0, 0.68 * sy, 0.0)},
+	]
+	return _combine_beveled_boxes(boxes, b, segments)
+
+
+static func _create_plastic_mouth_smile(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	var body := create_beveled_box(size, bevel, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var sx: float = size.x
+	var sy: float = size.y
+	var hz: float = size.z * 0.5
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_smile := Color(0.75, 0.15, 0.2)
+	var c_teeth := Color(1.0, 1.0, 1.0)
+	var c_cheek := Color(1.0, 0.55, 0.65)
+
+	# Curved smile base + corners
+	_add_colored_box(quads, colors, Vector3(-0.28 * sx, 0.24 * sy, hz + 0.005), Vector3(0.28 * sx, 0.44 * sy, hz + 0.055), c_smile)
+	_add_colored_box(quads, colors, Vector3(-0.35 * sx, 0.34 * sy, hz + 0.005), Vector3(-0.24 * sx, 0.50 * sy, hz + 0.055), c_smile)
+	_add_colored_box(quads, colors, Vector3(0.24 * sx, 0.34 * sy, hz + 0.005), Vector3(0.35 * sx, 0.50 * sy, hz + 0.055), c_smile)
+	# Gleaming white upper teeth strip
+	_add_colored_box(quads, colors, Vector3(-0.22 * sx, 0.36 * sy, hz + 0.055), Vector3(0.22 * sx, 0.44 * sy, hz + 0.085), c_teeth)
+	# Cute pink cheek dimples
+	for x_sign: float in [-1.0, 1.0]:
+		var cx: float = x_sign * 0.38 * sx
+		_add_colored_box(quads, colors, Vector3(cx - 0.07 * sx, 0.48 * sy, hz + 0.005), Vector3(cx + 0.07 * sx, 0.58 * sy, hz + 0.045), c_cheek)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_snout(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var muzzle_d: float = 0.35 * sz
+	var boxes: Array[Dictionary] = [
+		{"size": size, "offset": Vector3.ZERO},
+		{"size": Vector3(0.6 * sx, 0.45 * sy, muzzle_d), "offset": Vector3(0.0, 0.16 * sy, sz * 0.5 + muzzle_d * 0.35)},
+	]
+	var mesh := ArrayMesh.new()
+	var body := _combine_beveled_boxes(boxes, bevel * 0.85, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_nose := Color(0.12, 0.12, 0.14)
+	var front_z: float = sz * 0.5 + muzzle_d * 0.85
+	_add_colored_box(quads, colors, Vector3(-0.14 * sx, 0.44 * sy, front_z - 0.02), Vector3(0.14 * sx, 0.62 * sy, front_z + 0.07), c_nose)
+	_add_colored_box(quads, colors, Vector3(-0.08 * sx, 0.38 * sy, front_z - 0.02), Vector3(0.08 * sx, 0.46 * sy, front_z + 0.06), c_nose)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_ears(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var base_h: float = 0.25 * sy
+	var ear_h: float = 0.75 * sy
+	var ear_w: float = 0.30 * sx
+	var ear_d: float = 0.36 * sz
+	var boxes: Array[Dictionary] = [
+		{"size": Vector3(sx, base_h, sz), "offset": Vector3.ZERO},
+		{"size": Vector3(ear_w, ear_h, ear_d), "offset": Vector3(-0.30 * sx, base_h * 0.85, 0.0)},
+		{"size": Vector3(ear_w, ear_h, ear_d), "offset": Vector3(0.30 * sx, base_h * 0.85, 0.0)},
+	]
+	var mesh := ArrayMesh.new()
+	var body := _combine_beveled_boxes(boxes, bevel * 0.75, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_pink := Color(1.0, 0.65, 0.75)
+	var ear_z: float = ear_d * 0.5
+	for x_sign: float in [-1.0, 1.0]:
+		var cx: float = x_sign * 0.30 * sx
+		_add_colored_box(quads, colors, Vector3(cx - 0.08 * sx, base_h + 0.08 * sy, ear_z - 0.01), Vector3(cx + 0.08 * sx, base_h + 0.56 * sy, ear_z + 0.045), c_pink)
+		_add_colored_box(quads, colors, Vector3(cx - 0.045 * sx, base_h + 0.52 * sy, ear_z - 0.01), Vector3(cx + 0.045 * sx, base_h + 0.64 * sy, ear_z + 0.045), c_pink)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_paw(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var boxes: Array[Dictionary] = [
+		{"size": Vector3(sx * 0.86, sy, sz * 0.82), "offset": Vector3(0.0, 0.0, -0.06 * sz)},
+		{"size": Vector3(sx * 0.94, sy * 0.45, sz * 0.46), "offset": Vector3(0.0, 0.0, 0.25 * sz)},
+	]
+	var mesh := ArrayMesh.new()
+	var body := _combine_beveled_boxes(boxes, bevel * 0.85, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_toe := Color(1.0, 0.75, 0.8)
+	var front_z: float = 0.48 * sz
+	for idx in range(-1, 2):
+		var tx: float = float(idx) * 0.28 * sx
+		_add_colored_box(quads, colors, Vector3(tx - 0.10 * sx, 0.06 * sy, front_z - 0.02), Vector3(tx + 0.10 * sx, 0.34 * sy, front_z + 0.06), c_toe)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_crown_hat(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var base_h: float = 0.35 * sy
+	var mesh := ArrayMesh.new()
+	var body := create_beveled_box(Vector3(sx, base_h, sz), bevel * 0.8, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_gold := Color(1.0, 0.82, 0.15)
+	var c_ruby := Color(0.95, 0.2, 0.3)
+
+	# Gold crown band
+	_add_colored_box(quads, colors, Vector3(-0.42 * sx, base_h - 0.02, -0.42 * sz), Vector3(0.42 * sx, base_h + 0.22 * sy, 0.42 * sz), c_gold)
+	# 4 pointed crown peaks around top
+	var peak_offsets: Array[Vector3] = [
+		Vector3(0.0, base_h + 0.20 * sy, 0.30 * sz),
+		Vector3(0.0, base_h + 0.20 * sy, -0.30 * sz),
+		Vector3(-0.30 * sx, base_h + 0.20 * sy, 0.0),
+		Vector3(0.30 * sx, base_h + 0.20 * sy, 0.0),
+	]
+	for p_pos: Vector3 in peak_offsets:
+		_add_colored_cone(quads, colors, p_pos, 0.14 * minf(sx, sz), 0.42 * sy, Vector3.UP, 6, c_gold)
+	# Front center ruby-red gem
+	_add_colored_box(quads, colors, Vector3(-0.10 * sx, base_h + 0.05 * sy, 0.40 * sz), Vector3(0.10 * sx, base_h + 0.25 * sy, 0.48 * sz), c_ruby)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_wheel_axle(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var chassis_w: float = 0.70 * sx
+	var chassis_h: float = 0.60 * sy
+	var chassis_d: float = 0.60 * sz
+	var boxes: Array[Dictionary] = [
+		{"size": Vector3(chassis_w, chassis_h, chassis_d), "offset": Vector3(0.0, 0.20 * sy, 0.0)},
+		{"size": Vector3(sx * 0.88, 0.18 * sy, chassis_d * 0.9), "offset": Vector3(0.0, 0.55 * sy, 0.0)},
+	]
+	var mesh := ArrayMesh.new()
+	var body := _combine_beveled_boxes(boxes, bevel * 0.75, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_tire := Color(0.15, 0.15, 0.17)
+	var c_hub := Color(0.85, 0.88, 0.92)
+	var tire_r: float = minf(0.48 * sy, 0.48 * sz)
+	var tire_t: float = 0.28
+	var wheel_x: float = sx * 0.375
+	for x_sign: float in [-1.0, 1.0]:
+		var cx: float = x_sign * wheel_x
+		_add_colored_cylinder(quads, colors, Vector3(cx, tire_r, 0.0), tire_r, tire_t, Vector3.RIGHT, 14, c_tire)
+		_add_colored_cylinder(quads, colors, Vector3(cx + x_sign * (tire_t * 0.5 + 0.01), tire_r, 0.0), tire_r * 0.52, 0.04, Vector3.RIGHT, 12, c_hub)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_windshield(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var boxes: Array[Dictionary] = [
+		{"size": Vector3(sx, 0.28 * sy, sz), "offset": Vector3.ZERO},
+		{"size": Vector3(sx, 0.72 * sy, 0.35 * sz), "offset": Vector3(0.0, 0.28 * sy, -0.32 * sz)},
+		{"size": Vector3(0.16 * sx, 0.72 * sy, 0.45 * sz), "offset": Vector3(-sx * 0.5 + 0.08 * sx, 0.28 * sy, -0.05 * sz)},
+		{"size": Vector3(0.16 * sx, 0.72 * sy, 0.45 * sz), "offset": Vector3(sx * 0.5 - 0.08 * sx, 0.28 * sy, -0.05 * sz)},
+	]
+	var mesh := ArrayMesh.new()
+	var body := _combine_beveled_boxes(boxes, bevel * 0.7, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_glass := Color(0.5, 0.85, 1.0)
+	var c_glare := Color(0.95, 0.99, 1.0)
+	var gx: float = 0.36 * sx
+	var y_bot: float = 0.28 * sy
+	var y_top: float = sy - 0.04
+	var z_bot: float = 0.44 * sz
+	var z_top: float = -0.10 * sz
+	var p0 := Vector3(-gx, y_bot, z_bot)
+	var p1 := Vector3(gx, y_bot, z_bot)
+	var p2 := Vector3(gx, y_top, z_top)
+	var p3 := Vector3(-gx, y_top, z_top)
+	_add_colored_quad(quads, colors, p0, p1, p2, p3, c_glass)
+	# Subtle glare streak slightly in front of glass
+	var n_off := Vector3(0.0, 0.02, 0.025)
+	_add_colored_quad(
+		quads, colors,
+		Vector3(-gx * 0.55, y_bot + 0.08 * sy, z_bot - 0.04) + n_off,
+		Vector3(-gx * 0.28, y_bot + 0.08 * sy, z_bot - 0.04) + n_off,
+		Vector3(-gx * 0.08, y_top - 0.06 * sy, z_top + 0.04) + n_off,
+		Vector3(-gx * 0.35, y_top - 0.06 * sy, z_top + 0.04) + n_off,
+		c_glare
+	)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_headlight_bumper(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var boxes: Array[Dictionary] = [
+		{"size": size, "offset": Vector3.ZERO},
+		{"size": Vector3(sx * 1.02, 0.24 * sy, 0.22 * sz), "offset": Vector3(0.0, 0.0, sz * 0.5 + 0.04)},
+	]
+	var mesh := ArrayMesh.new()
+	var body := _combine_beveled_boxes(boxes, bevel * 0.8, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_light := Color(1.0, 0.92, 0.25)
+	var c_grille := Color(0.75, 0.78, 0.82)
+	var c_slot := Color(0.18, 0.20, 0.24)
+	var hz: float = sz * 0.5
+
+	for x_sign: float in [-1.0, 1.0]:
+		_add_colored_cylinder(quads, colors, Vector3(x_sign * 0.33 * sx, 0.56 * sy, hz + 0.03), 0.13 * minf(sx, sy), 0.06, Vector3(0.0, 0.0, 1.0), 12, c_light)
+	_add_colored_box(quads, colors, Vector3(-0.16 * sx, 0.34 * sy, hz + 0.005), Vector3(0.16 * sx, 0.74 * sy, hz + 0.045), c_grille)
+	for bar_i in range(3):
+		var by: float = (0.40 + float(bar_i) * 0.12) * sy
+		_add_colored_box(quads, colors, Vector3(-0.13 * sx, by, hz + 0.042), Vector3(0.13 * sx, by + 0.04 * sy, hz + 0.062), c_slot)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_steering_wheel(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var boxes: Array[Dictionary] = [
+		{"size": Vector3(sx, 0.42 * sy, sz), "offset": Vector3.ZERO},
+		{"size": Vector3(sx * 0.92, 0.20 * sy, 0.55 * sz), "offset": Vector3(0.0, 0.36 * sy, -0.18 * sz)},
+	]
+	var mesh := ArrayMesh.new()
+	var body := _combine_beveled_boxes(boxes, bevel * 0.65, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_col := Color(0.24, 0.26, 0.30)
+	var c_wheel := Color(0.16, 0.18, 0.22)
+	var c_horn := Color(0.92, 0.22, 0.26)
+	var wheel_axis := Vector3(0.0, 0.55, 0.84).normalized()
+	var wheel_center := Vector3(0.0, 0.72 * sy, 0.18 * sz)
+
+	# Tilted steering column
+	_add_colored_cylinder(quads, colors, Vector3(0.0, 0.56 * sy, 0.06 * sz), 0.075 * minf(sx, sy), 0.32 * sy, wheel_axis, 10, c_col)
+
+	# Circular steering wheel ring built from segmented rim blocks
+	var ring_r: float = 0.26 * minf(sx, sy)
+	var rim_r: float = 0.045 * minf(sx, sy)
+	var u := Vector3.RIGHT
+	var v := wheel_axis.cross(u).normalized()
+	var ring_segs: int = 12
+	for i in range(ring_segs):
+		var a0: float = TAU * float(i) / float(ring_segs)
+		var a1: float = TAU * float(i + 1) / float(ring_segs)
+		var p0 := wheel_center + (u * cos(a0) + v * sin(a0)) * ring_r
+		var p1 := wheel_center + (u * cos(a1) + v * sin(a1)) * ring_r
+		var seg_dir := (p1 - p0).normalized()
+		_add_colored_cylinder(quads, colors, (p0 + p1) * 0.5, rim_r, p0.distance_to(p1) * 1.15, seg_dir, 6, c_wheel)
+
+	# Spokes & red center horn button
+	_add_colored_box(quads, colors, wheel_center - Vector3(ring_r * 0.85, 0.03, 0.03), wheel_center + Vector3(ring_r * 0.85, 0.03, 0.03), c_col)
+	_add_colored_cylinder(quads, colors, wheel_center + wheel_axis * 0.025, 0.095 * minf(sx, sy), 0.05, wheel_axis, 10, c_horn)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_wing_fin(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var boxes: Array[Dictionary] = [
+		{"size": Vector3(sx * 0.45, sy, sz), "offset": Vector3(0.0, 0.0, 0.0)},
+		{"size": Vector3(sx * 0.98, sy * 0.82, sz * 0.62), "offset": Vector3(0.0, sy * 0.08, -0.14 * sz)},
+	]
+	return _combine_beveled_boxes(boxes, bevel * 0.55, segments)
+
+
+static func _create_plastic_propeller_block(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	var body := create_beveled_box(size, bevel, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var sx: float = size.x
+	var sy: float = size.y
+	var hz: float = size.z * 0.5
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_spinner := Color(0.85, 0.88, 0.9)
+	var c_blade := Color(0.22, 0.24, 0.28)
+	var c_tip := Color(1.0, 0.85, 0.15)
+	var cy: float = sy * 0.5
+
+	# 4 crossed propeller blades + yellow safety tips
+	_add_colored_box(quads, colors, Vector3(-0.07 * sx, cy - 0.36 * sy, hz + 0.02), Vector3(0.07 * sx, cy + 0.36 * sy, hz + 0.07), c_blade)
+	_add_colored_box(quads, colors, Vector3(-0.36 * sx, cy - 0.07 * sy, hz + 0.02), Vector3(0.36 * sx, cy + 0.07 * sy, hz + 0.07), c_blade)
+	_add_colored_box(quads, colors, Vector3(-0.075 * sx, cy + 0.34 * sy, hz + 0.02), Vector3(0.075 * sx, cy + 0.44 * sy, hz + 0.07), c_tip)
+	_add_colored_box(quads, colors, Vector3(-0.075 * sx, cy - 0.44 * sy, hz + 0.02), Vector3(0.075 * sx, cy - 0.34 * sy, hz + 0.07), c_tip)
+	_add_colored_box(quads, colors, Vector3(-0.44 * sx, cy - 0.075 * sy, hz + 0.02), Vector3(-0.34 * sx, cy + 0.075 * sy, hz + 0.07), c_tip)
+	_add_colored_box(quads, colors, Vector3(0.34 * sx, cy - 0.075 * sy, hz + 0.02), Vector3(0.44 * sx, cy + 0.075 * sy, hz + 0.07), c_tip)
+	# Central silver spinner cone
+	_add_colored_cone(quads, colors, Vector3(0.0, cy, hz + 0.05), 0.14 * minf(sx, sy), 0.22, Vector3(0.0, 0.0, 1.0), 10, c_spinner)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_vertex_color_material())
+	return mesh
+
+
+static func _create_plastic_siren_light(size: Vector3, bevel: float, segments: int) -> ArrayMesh:
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var base_h: float = 0.36 * sy
+	var mesh := ArrayMesh.new()
+	var body := create_beveled_box(Vector3(sx, base_h, sz * 0.65), bevel * 0.6, segments)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_red := Color(1.0, 0.2, 0.25)
+	var c_blue := Color(0.15, 0.55, 1.0)
+	var c_white := Color(0.95, 0.96, 0.98)
+	var dome_h: float = 0.64 * sy
+	_add_colored_box(quads, colors, Vector3(-0.46 * sx, base_h - 0.01, -0.26 * sz), Vector3(-0.10 * sx, base_h + dome_h, 0.26 * sz), c_red)
+	_add_colored_box(quads, colors, Vector3(0.10 * sx, base_h - 0.01, -0.26 * sz), Vector3(0.46 * sx, base_h + dome_h, 0.26 * sz), c_blue)
+	_add_colored_box(quads, colors, Vector3(-0.10 * sx, base_h - 0.01, -0.22 * sz), Vector3(0.10 * sx, base_h + dome_h * 0.72, 0.22 * sz), c_white)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
 	mesh.surface_set_material(1, _get_vertex_color_material())
 	return mesh
 
@@ -1749,4 +2372,177 @@ static func _build_array_mesh(
 
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+static func _get_solid_vertex_color_material() -> StandardMaterial3D:
+	var cache_key: String = "solid|vertex_detail"
+	if _material_cache.has(cache_key):
+		return _material_cache[cache_key] as StandardMaterial3D
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.albedo_color = Color.WHITE
+	mat.roughness = 1.0
+	mat.metallic = 0.0
+	mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+	mat.rim_enabled = false
+	_material_cache[cache_key] = mat
+	return mat
+
+
+static func _create_sharp_box(size: Vector3) -> ArrayMesh:
+	var hx: float = size.x * 0.5
+	var hz: float = size.z * 0.5
+	var quads: Array = []
+	_append_box_quads(quads, Vector3(-hx, 0.0, -hz), Vector3(hx, size.y, hz))
+	return _build_quad_surface(quads)
+
+
+static func _combine_sharp_boxes(sub_boxes: Array[Array]) -> ArrayMesh:
+	var quads: Array = []
+	for box_bounds: Array in sub_boxes:
+		_append_box_quads(quads, box_bounds[0] as Vector3, box_bounds[1] as Vector3)
+	return _build_quad_surface(quads)
+
+
+static func _create_sharp_wedge(size: Vector3) -> ArrayMesh:
+	var verts := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var uvs := PackedVector2Array()
+	var indices := PackedInt32Array()
+	_build_sharp_ramp(size, size.x * 0.5, size.y, size.z * 0.5, verts, normals, uvs, indices)
+	return _build_array_mesh(verts, normals, uvs, PackedColorArray(), indices)
+
+
+static func _create_solid_piece_mesh(piece_type: String, size: Vector3) -> ArrayMesh:
+	var mesh: ArrayMesh
+	var hx: float = size.x * 0.5
+	var hy: float = size.y
+	var hz: float = size.z * 0.5
+
+	if piece_type in ["solid_slope_1x1", "solid_slope_2x1", "solid_windshield_2x1", "ramp"]:
+		mesh = _create_sharp_wedge(size)
+	elif piece_type == "roof_gable":
+		mesh = _create_plastic_roof_gable(size)
+	elif piece_type == "arch_bridge":
+		mesh = _create_plastic_arch_bridge(size, 0.0, 1)
+	elif piece_type in ["solid_corner_L", "corner_block"]:
+		mesh = _combine_sharp_boxes([
+			[Vector3(-hx, 0.0, -hz), Vector3(hx, hy * 0.5, hz)],
+			[Vector3(-hx, hy * 0.5, -hz), Vector3(hx, hy, 0.0)],
+		])
+	elif piece_type == "solid_tail_step":
+		mesh = _combine_sharp_boxes([
+			[Vector3(-hx, 0.0, -hz), Vector3(hx, hy * 0.5, hz)],
+			[Vector3(-hx, hy * 0.5, -hz), Vector3(0.0, hy, hz)],
+		])
+	elif piece_type == "solid_fender":
+		mesh = _combine_sharp_boxes([
+			[Vector3(-hx, 0.0, -hz), Vector3(hx, hy * 0.5, hz)],
+			[Vector3(-hx, hy * 0.5, 0.0), Vector3(hx, hy, hz)],
+		])
+	elif piece_type == "solid_frame_window":
+		var ft: float = 0.25 * minf(size.x, size.y)
+		mesh = _combine_sharp_boxes([
+			[Vector3(-hx, 0.0, -hz), Vector3(hx, ft, hz)],
+			[Vector3(-hx, hy - ft, -hz), Vector3(hx, hy, hz)],
+			[Vector3(-hx, ft, -hz), Vector3(-hx + ft, hy - ft, hz)],
+			[Vector3(hx - ft, ft, -hz), Vector3(hx, hy - ft, hz)],
+		])
+	elif piece_type == "cylinder":
+		mesh = _create_plastic_cylinder(size)
+	elif piece_type == "cone":
+		mesh = _create_plastic_cone(size)
+	elif piece_type == "solid_eye_side":
+		mesh = _create_solid_eye_side(size)
+	elif piece_type in ["solid_eye_front", "plastic_eye"]:
+		mesh = _create_solid_eye_front(size)
+	elif piece_type in ["solid_wheel_block", "wheel_axle"]:
+		mesh = _create_solid_wheel_block(size)
+	else:
+		mesh = _create_sharp_box(size)
+
+	if mesh.get_surface_count() > 1:
+		mesh.surface_set_material(1, _get_solid_vertex_color_material())
+	return mesh
+
+
+static func _create_solid_eye_side(size: Vector3) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	var body := _create_sharp_box(size)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_pupil := Color(0.10, 0.11, 0.14)
+	var hz: float = size.z * 0.5
+	var pw: float = 0.20 * size.x
+	var ph: float = 0.20 * size.y
+	var cy: float = size.y * 0.5
+	_add_colored_box(quads, colors, Vector3(-pw, cy - ph, hz), Vector3(pw, cy + ph, hz + 0.04), c_pupil)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_solid_vertex_color_material())
+	return mesh
+
+
+static func _create_solid_eye_front(size: Vector3) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	var body := _create_sharp_box(size)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var sx: float = size.x
+	var sy: float = size.y
+	var hz: float = size.z * 0.5
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_white := Color(1.0, 1.0, 1.0)
+	var c_pupil := Color(0.10, 0.11, 0.14)
+	for x_sign: float in [-1.0, 1.0]:
+		var cx: float = x_sign * 0.22 * sx
+		_add_colored_box(quads, colors, Vector3(cx - 0.14 * sx, 0.30 * sy, hz), Vector3(cx + 0.14 * sx, 0.72 * sy, hz + 0.025), c_white)
+		_add_colored_box(quads, colors, Vector3(cx - 0.07 * sx, 0.40 * sy, hz + 0.025), Vector3(cx + 0.07 * sx, 0.60 * sy, hz + 0.045), c_pupil)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_solid_vertex_color_material())
+	return mesh
+
+
+static func _create_solid_wheel_block(size: Vector3) -> ArrayMesh:
+	var mesh := ArrayMesh.new()
+	var body := _create_sharp_box(size)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, body.surface_get_arrays(0))
+
+	var sx: float = size.x
+	var sy: float = size.y
+	var sz: float = size.z
+	var quads: Array = []
+	var colors: Array[Color] = []
+	var c_tire := Color(0.14, 0.15, 0.18)
+	var c_hub := Color(0.92, 0.94, 0.96)
+	var wheel_w: float = 0.06 * sx
+	var wheel_h: float = 0.68 * sy
+	var wheel_d: float = 0.68 * sz
+	for x_sign: float in [-1.0, 1.0]:
+		var x0: float = x_sign * (sx * 0.5)
+		var x1: float = x_sign * (sx * 0.5 + wheel_w)
+		_add_colored_box(
+			quads, colors,
+			Vector3(minf(x0, x1), 0.06 * sy, -wheel_d * 0.5),
+			Vector3(maxf(x0, x1), 0.06 * sy + wheel_h, wheel_d * 0.5),
+			c_tire
+		)
+		var hub_out: float = x1 + x_sign * 0.025
+		_add_colored_box(
+			quads, colors,
+			Vector3(minf(x1, hub_out), 0.22 * sy, -0.18 * sz),
+			Vector3(maxf(x1, hub_out), 0.58 * sy, 0.18 * sz),
+			c_hub
+		)
+
+	var detail := _build_colored_quad_surface(quads, colors)
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, detail.surface_get_arrays(0))
+	mesh.surface_set_material(1, _get_solid_vertex_color_material())
 	return mesh

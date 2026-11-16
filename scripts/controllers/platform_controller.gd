@@ -26,13 +26,16 @@ static var _shared_blob_shadow_mat: StandardMaterial3D = null
 var current_theme_id: String = "plastic"
 
 var _board_size: int = _DEFAULT_VISUAL_GRID_SIZE
+var _mode_id: String = ""
 var _theme_id: String = "plastic"
 var _tile_count: int = 0
 var _built: bool = false
 var _floor_mat: StandardMaterial3D = null
 var _board_mat: StandardMaterial3D = null
+var _dot_mat: StandardMaterial3D = null
 var _floor_instance: MeshInstance3D = null
 var _dots_mmi: MultiMeshInstance3D = null
+var _mode_stage_root: Node3D = null
 var _voxel_world_root: Node3D = null
 var _clouds_root: Node3D = null
 var _voxel_animals: Array[Dictionary] = []
@@ -43,6 +46,11 @@ var _owned_world_env: WorldEnvironment = null
 var _default_environment: Environment = null
 var _has_captured_default_env: bool = false
 var _voxel_environment: Environment = null
+var _solid_environment: Environment = null
+var _target_dir_light: DirectionalLight3D = null
+var _owned_dir_light: DirectionalLight3D = null
+var _has_captured_default_light: bool = false
+var _default_light_state: Dictionary = {}
 
 
 func _ready() -> void:
@@ -128,6 +136,30 @@ func set_grid_size(size: int) -> void:
 	build_platform(target_size)
 
 
+## Sets the active play mode ("character", "animal", "vehicle", "scenery") and updates stage visuals.
+func set_mode(mode_id: String) -> void:
+	if _mode_id == mode_id and _built:
+		return
+	_mode_id = mode_id
+	if _built:
+		_rebuild_mode_stage()
+		_apply_theme_materials()
+
+
+func get_mode_id() -> String:
+	return _resolve_effective_mode_id()
+
+
+func _resolve_effective_mode_id() -> String:
+	if not _mode_id.is_empty():
+		return _mode_id
+	if _board_size == 12:
+		return "vehicle"
+	if _board_size >= 16:
+		return "scenery"
+	return "character"
+
+
 func build_platform(board_size: int = _DEFAULT_VISUAL_GRID_SIZE) -> void:
 	_clear_generated_nodes()
 	_board_size = maxi(board_size, 1)
@@ -180,18 +212,18 @@ func build_platform(board_size: int = _DEFAULT_VISUAL_GRID_SIZE) -> void:
 	dot_mesh.height = _DOT_HEIGHT
 	dot_mesh.radial_segments = 14
 
-	var dot_mat := StandardMaterial3D.new()
-	dot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dot_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	dot_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.16)
-	dot_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	dot_mat.render_priority = 1
+	_dot_mat = StandardMaterial3D.new()
+	_dot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_dot_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_dot_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.16)
+	_dot_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	_dot_mat.render_priority = 1
 
 	var dot_positions: Array[Vector3] = []
 	for gz in range(_board_size):
 		for gx in range(_board_size):
 			var tile_pos := get_tile_position(gx, gz)
-			tile_pos.y = _DOT_Y
+			tile_pos.y = 0.002
 			dot_positions.append(tile_pos)
 
 	var multimesh := MultiMesh.new()
@@ -204,7 +236,7 @@ func build_platform(board_size: int = _DEFAULT_VISUAL_GRID_SIZE) -> void:
 	_dots_mmi = MultiMeshInstance3D.new()
 	_dots_mmi.name = "GridDotMarkers"
 	_dots_mmi.multimesh = multimesh
-	_dots_mmi.material_override = dot_mat
+	_dots_mmi.material_override = _dot_mat
 	_dots_mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(_dots_mmi)
 
@@ -214,6 +246,7 @@ func build_platform(board_size: int = _DEFAULT_VISUAL_GRID_SIZE) -> void:
 
 	_tile_count = dot_positions.size()
 	_built = true
+	_rebuild_mode_stage()
 	_apply_theme_materials()
 	_apply_theme_environment()
 	set_process(current_theme_id == "voxel")
@@ -241,14 +274,22 @@ func get_tile_position(grid_x: int, grid_z: int) -> Vector3:
 
 func _apply_theme_materials() -> void:
 	var is_voxel: bool = (current_theme_id == "voxel")
+	var is_solid: bool = (current_theme_id == "solid")
+	var effective_mode: String = _resolve_effective_mode_id()
 	var floor_col: Color = ThemeVisuals.STUDIO_BLUE
 	var board_col: Color = ThemeVisuals.STUDIO_BLUE.lightened(0.06)
-	if current_theme_id == "wood":
+	if is_solid:
+		floor_col = Color("#08C6F7")
+		board_col = Color("#08C6F7")
+	elif current_theme_id == "wood":
 		floor_col = Color("#B57B4C")
 		board_col = Color("#C88E5E")
+	if effective_mode == "vehicle" and not is_voxel and not is_solid:
+		board_col = Color("#3F444E")
 
 	if _floor_mat != null:
 		_floor_mat.albedo_color = floor_col
+		_floor_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED if is_solid else BaseMaterial3D.SPECULAR_SCHLICK_GGX
 	if _floor_instance != null and is_instance_valid(_floor_instance):
 		_floor_instance.visible = not is_voxel
 
@@ -261,15 +302,22 @@ func _apply_theme_materials() -> void:
 			_board_mat.uv1_scale = Vector3(float(_board_size), float(_board_size), 1.0)
 			_board_mat.roughness = 0.88
 			_board_mat.metallic_specular = 0.1
+			_board_mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
 		else:
 			_board_mat.albedo_texture = null
 			_board_mat.albedo_color = board_col
 			_board_mat.uv1_scale = Vector3.ONE
-			_board_mat.roughness = 0.92
-			_board_mat.metallic_specular = 0.06
+			_board_mat.roughness = 0.95 if is_solid else 0.92
+			_board_mat.metallic_specular = 0.0 if is_solid else 0.06
+			_board_mat.specular_mode = BaseMaterial3D.SPECULAR_DISABLED if is_solid else BaseMaterial3D.SPECULAR_SCHLICK_GGX
+
+	if _dot_mat != null:
+		_dot_mat.albedo_color = Color(0.02, 0.616, 0.769, 0.72) if is_solid else Color(1.0, 1.0, 1.0, 0.16)
 
 	if _dots_mmi != null and is_instance_valid(_dots_mmi):
 		_dots_mmi.visible = not is_voxel
+	if _mode_stage_root != null and is_instance_valid(_mode_stage_root):
+		_mode_stage_root.visible = not is_solid
 	if is_voxel:
 		if _voxel_world_root == null or not is_instance_valid(_voxel_world_root):
 			_build_voxel_world(float(_board_size) * PieceCatalog.GRID_UNIT_SIZE)
@@ -277,6 +325,112 @@ func _apply_theme_materials() -> void:
 			_build_voxel_clouds()
 	else:
 		_free_voxel_background_nodes()
+
+
+func _rebuild_mode_stage() -> void:
+	if _mode_stage_root != null and is_instance_valid(_mode_stage_root):
+		remove_child(_mode_stage_root)
+		_mode_stage_root.queue_free()
+	_mode_stage_root = null
+
+	var mode: String = _resolve_effective_mode_id()
+	if mode == "scenery":
+		return
+
+	_mode_stage_root = Node3D.new()
+	_mode_stage_root.name = "ModeStageDecor"
+	add_child(_mode_stage_root)
+
+	var board_world_size: float = float(_board_size) * PieceCatalog.GRID_UNIT_SIZE
+	var half_board: float = board_world_size * 0.5
+
+	if mode == "character":
+		_add_border_frame(
+			_mode_stage_root,
+			"CharacterPedestal",
+			half_board,
+			0.32,
+			0.12,
+			-0.06,
+			_get_shared_flat_material(Color("#E2E8F0"))
+		)
+	elif mode == "animal":
+		_add_border_frame(
+			_mode_stage_root,
+			"AnimalGrassRim",
+			half_board,
+			0.36,
+			0.08,
+			-0.04,
+			_get_shared_flat_material(Color("#5CB85C"))
+		)
+		_add_border_frame(
+			_mode_stage_root,
+			"AnimalEarthBase",
+			half_board + 0.10,
+			0.32,
+			0.14,
+			-0.11,
+			_get_shared_flat_material(Color("#A1623B"))
+		)
+	elif mode == "vehicle":
+		var asphalt_mat := _get_shared_flat_material(Color("#2D323B"))
+		var stripe_mat := _get_shared_flat_material(Color("#F8FAFC"), true)
+		var curb_mat := _get_shared_flat_material(Color("#FACC15"))
+		_add_border_frame(
+			_mode_stage_root,
+			"VehicleRoadBorder",
+			half_board,
+			0.75,
+			0.10,
+			-0.05,
+			asphalt_mat
+		)
+		# White dashed road stripes along the left and right sides of the 12x12 track
+		var stripe_x: float = half_board + 0.36
+		var dash_count: int = maxi(4, int(_board_size / 2))
+		var span: float = board_world_size + 0.6
+		var step_z: float = span / float(dash_count)
+		var dash_len: float = step_z * 0.52
+		for i in range(dash_count):
+			var z_pos: float = -span * 0.5 + (float(i) + 0.5) * step_z
+			for side in [-1.0, 1.0]:
+				_add_voxel_box(
+					_mode_stage_root,
+					"RoadStripe_%d_%d" % [i, int(side)],
+					Vector3(0.14, 0.01, dash_len),
+					Vector3(side * stripe_x, 0.002, z_pos),
+					stripe_mat,
+					false
+				)
+		# Subtle yellow start/finish curb bars on front & back edges
+		for end_sign in [-1.0, 1.0]:
+			_add_voxel_box(
+				_mode_stage_root,
+				"RoadCurb_%d" % int(end_sign),
+				Vector3(board_world_size + 0.2, 0.012, 0.12),
+				Vector3(0.0, 0.002, end_sign * (half_board + 0.18)),
+				curb_mat,
+				false
+			)
+
+
+func _add_border_frame(
+	parent: Node3D,
+	prefix: String,
+	inner_half: float,
+	border_width: float,
+	height: float,
+	center_y: float,
+	mat: Material
+) -> void:
+	var full_span: float = (inner_half + border_width) * 2.0
+	var side_len: float = inner_half * 2.0
+	var offset: float = inner_half + border_width * 0.5
+	_add_voxel_box(parent, prefix + "_North", Vector3(full_span, height, border_width), Vector3(0.0, center_y, -offset), mat, false)
+	_add_voxel_box(parent, prefix + "_South", Vector3(full_span, height, border_width), Vector3(0.0, center_y, offset), mat, false)
+	_add_voxel_box(parent, prefix + "_West", Vector3(border_width, height, side_len), Vector3(-offset, center_y, 0.0), mat, false)
+	_add_voxel_box(parent, prefix + "_East", Vector3(border_width, height, side_len), Vector3(offset, center_y, 0.0), mat, false)
 
 
 static func _get_shared_box_mesh(size: Vector3) -> BoxMesh:
@@ -677,23 +831,102 @@ func _apply_theme_environment() -> void:
 			_voxel_environment.adjustment_contrast = 1.08
 			_voxel_environment.adjustment_brightness = 1.03
 		world_env.environment = _voxel_environment
+	elif current_theme_id == "solid":
+		if _solid_environment == null:
+			_solid_environment = Environment.new()
+			_solid_environment.background_mode = Environment.BG_COLOR
+			_solid_environment.background_color = Color("#08C6F7")
+			_solid_environment.fog_enabled = false
+			_solid_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+			_solid_environment.ambient_light_color = Color("#48D9FF")
+			_solid_environment.ambient_light_energy = 0.55
+		world_env.environment = _solid_environment
 	else:
 		world_env.environment = _default_environment
+	_apply_theme_lighting()
+
+
+func _apply_theme_lighting() -> void:
+	var dir_light := _ensure_directional_light()
+	if dir_light == null:
+		return
+	if current_theme_id == "solid":
+		dir_light.rotation_degrees = Vector3(-48.0, -38.0, 0.0)
+		dir_light.shadow_enabled = true
+		dir_light.shadow_blur = 1.5
+		dir_light.light_energy = 1.15
+		dir_light.light_color = Color.WHITE
+	elif _has_captured_default_light and not _default_light_state.is_empty():
+		dir_light.rotation_degrees = _default_light_state["rotation_degrees"] as Vector3
+		dir_light.shadow_enabled = bool(_default_light_state["shadow_enabled"])
+		dir_light.shadow_blur = float(_default_light_state["shadow_blur"])
+		dir_light.light_energy = float(_default_light_state["light_energy"])
+		dir_light.light_color = _default_light_state["light_color"] as Color
+
+
+func _ensure_directional_light() -> DirectionalLight3D:
+	if _target_dir_light != null and is_instance_valid(_target_dir_light):
+		return _target_dir_light
+	if is_inside_tree():
+		var tree := get_tree()
+		if tree != null and tree.root != null:
+			var found := _find_directional_light_recursive(tree.root)
+			if found != null:
+				_target_dir_light = found
+				if not _has_captured_default_light:
+					_default_light_state = {
+						"rotation_degrees": found.rotation_degrees,
+						"shadow_enabled": found.shadow_enabled,
+						"shadow_blur": found.shadow_blur,
+						"light_energy": found.light_energy,
+						"light_color": found.light_color,
+					}
+					_has_captured_default_light = true
+				return _target_dir_light
+	_owned_dir_light = DirectionalLight3D.new()
+	_owned_dir_light.name = "PlatformDirectionalLight"
+	_owned_dir_light.rotation_degrees = Vector3(-48.0, -38.0, 0.0)
+	_owned_dir_light.shadow_enabled = true
+	_owned_dir_light.shadow_blur = 1.5
+	_owned_dir_light.light_energy = 1.15
+	add_child(_owned_dir_light)
+	_target_dir_light = _owned_dir_light
+	if not _has_captured_default_light:
+		_default_light_state = {
+			"rotation_degrees": _owned_dir_light.rotation_degrees,
+			"shadow_enabled": _owned_dir_light.shadow_enabled,
+			"shadow_blur": _owned_dir_light.shadow_blur,
+			"light_energy": _owned_dir_light.light_energy,
+			"light_color": _owned_dir_light.light_color,
+		}
+		_has_captured_default_light = true
+	return _target_dir_light
+
+
+func _find_directional_light_recursive(node: Node) -> DirectionalLight3D:
+	if node is DirectionalLight3D and node != _owned_dir_light:
+		return node as DirectionalLight3D
+	for child in node.get_children():
+		var found := _find_directional_light_recursive(child)
+		if found != null:
+			return found
+	return null
 
 
 func _ensure_world_environment() -> WorldEnvironment:
 	if _target_world_env != null and is_instance_valid(_target_world_env):
 		return _target_world_env
 
-	var tree := get_tree()
-	if tree != null and tree.root != null:
-		var found := _find_world_environment_recursive(tree.root)
-		if found != null:
-			_target_world_env = found
-			if not _has_captured_default_env:
-				_default_environment = found.environment
-				_has_captured_default_env = true
-			return _target_world_env
+	if is_inside_tree():
+		var tree := get_tree()
+		if tree != null and tree.root != null:
+			var found := _find_world_environment_recursive(tree.root)
+			if found != null:
+				_target_world_env = found
+				if not _has_captured_default_env:
+					_default_environment = found.environment
+					_has_captured_default_env = true
+				return _target_world_env
 
 	_owned_world_env = WorldEnvironment.new()
 	_owned_world_env.name = "PlatformWorldEnvironment"
@@ -719,8 +952,13 @@ func _clear_generated_nodes() -> void:
 	if _target_world_env == _owned_world_env:
 		_target_world_env = null
 	_owned_world_env = null
+	if _target_dir_light == _owned_dir_light:
+		_target_dir_light = null
+	_owned_dir_light = null
+	_dot_mat = null
 	_floor_instance = null
 	_dots_mmi = null
+	_mode_stage_root = null
 	_voxel_world_root = null
 	_clouds_root = null
 	_voxel_animals.clear()

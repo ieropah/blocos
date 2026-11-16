@@ -37,7 +37,7 @@ var grid_size: int = 8:
 
 var theme_id: String = "plastic":
 	set(value):
-		theme_id = value if value in ["plastic", "voxel", "wood"] else "plastic"
+		theme_id = value if value in ["plastic", "voxel", "solid", "wood"] else "plastic"
 		if placement_system != null:
 			placement_system.set_theme_rules(theme_id)
 

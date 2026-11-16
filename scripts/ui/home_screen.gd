@@ -7,6 +7,7 @@ extends CanvasLayer
 
 signal project_started(grid_size: int, theme_id: String)
 signal start_new_project_requested(grid_size: int, theme_id: String)
+signal mode_started(mode_id: String, grid_size: int, theme_id: String, initial_category: String)
 signal gallery_pressed
 signal open_gallery_requested
 signal theme_changed(theme_id: String)
@@ -32,6 +33,15 @@ const WORLD_THEMES: Dictionary = {
 		"pill_color": Color("#60A5FA"),
 		"curtain_color": Color("#FFB74D"),
 	},
+	"solid": {
+		"label": "Sólido",
+		"bg_color": Color("#08C6F7"),
+		"card_bg": Color("#F8FEFF"),
+		"card_border": Color("#7DD3FC"),
+		"card_accent": Color("#0284C7"),
+		"pill_color": Color("#38BDF8"),
+		"curtain_color": Color("#08C6F7"),
+	},
 	"voxel": {
 		"label": "Voxel",
 		"bg_color": Color("#4A8B5B"),
@@ -52,7 +62,50 @@ const WORLD_THEMES: Dictionary = {
 	},
 }
 
-const WORLD_ORDER: Array[String] = ["plastic", "voxel", "wood"]
+const WORLD_ORDER: Array[String] = ["plastic", "solid", "voxel", "wood"]
+
+const MODE_DEFINITIONS: Array[Dictionary] = [
+	{
+		"mode_id": "character",
+		"node_name": "CharacterCard",
+		"title": "Boneco",
+		"icon": "mode_character",
+		"grid_size": 8,
+		"size_text": "8x8",
+		"grid_divisions": 3,
+		"initial_category": "creature",
+	},
+	{
+		"mode_id": "animal",
+		"node_name": "AnimalCard",
+		"title": "Bichinho",
+		"icon": "mode_animal",
+		"grid_size": 8,
+		"size_text": "8x8",
+		"grid_divisions": 3,
+		"initial_category": "creature",
+	},
+	{
+		"mode_id": "vehicle",
+		"node_name": "VehicleCard",
+		"title": "Veículo",
+		"icon": "mode_vehicle",
+		"grid_size": 12,
+		"size_text": "12x12",
+		"grid_divisions": 4,
+		"initial_category": "vehicle",
+	},
+	{
+		"mode_id": "scenery",
+		"node_name": "SceneryCard",
+		"title": "Cenário",
+		"icon": "mode_scenery",
+		"grid_size": 16,
+		"size_text": "16x16",
+		"grid_divisions": 5,
+		"initial_category": "building",
+	},
+]
 
 
 class MiniGridBadge extends Control:
@@ -84,13 +137,19 @@ var _bg_tex_b: TextureRect = null
 var _active_bg_layer_is_a: bool = true
 var _center_column: VBoxContainer = null
 var _character_card: Button = null
+var _animal_card: Button = null
+var _vehicle_card: Button = null
 var _scenery_card: Button = null
+var _mode_cards: Array[Button] = []
+var _mode_badges: Array[MiniGridBadge] = []
 var _character_badge: MiniGridBadge = null
 var _scenery_badge: MiniGridBadge = null
 var _scenery_size_label: Label = null
 var _world_buttons: Dictionary = {}
 var _gallery_button: Button = null
 var _active_theme_id: String = "plastic"
+var _selected_mode_id: String = "character"
+var _selected_initial_category: String = "creature"
 var _bg_tween: Tween = null
 var _pulse_tween: Tween = null
 var _transition_layer: CanvasLayer = null
@@ -146,34 +205,41 @@ func ensure_setup() -> void:
 	var cards_row := HBoxContainer.new()
 	cards_row.name = "ModeCardsRow"
 	cards_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	cards_row.add_theme_constant_override("separation", 32)
+	cards_row.add_theme_constant_override("separation", 20)
 	cards_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_center_column.add_child(cards_row)
 
-	var char_result := _create_mode_card(
-		"CharacterCard",
-		"Bichinho",
-		"mode_character",
-		"8x8",
-		3,
-		8
-	)
-	_character_card = char_result["button"] as Button
-	_character_badge = char_result["badge"] as MiniGridBadge
-	cards_row.add_child(_character_card)
-
-	var scenery_result := _create_mode_card(
-		"SceneryCard",
-		"Cenário",
-		"mode_scenery",
-		"16x16",
-		5,
-		16
-	)
-	_scenery_card = scenery_result["button"] as Button
-	_scenery_badge = scenery_result["badge"] as MiniGridBadge
-	_scenery_size_label = scenery_result["size_label"] as Label
-	cards_row.add_child(_scenery_card)
+	_mode_cards.clear()
+	_mode_badges.clear()
+	for mode_def: Dictionary in MODE_DEFINITIONS:
+		var mode_id: String = str(mode_def["mode_id"])
+		var card_result := _create_mode_card(
+			mode_id,
+			str(mode_def["node_name"]),
+			str(mode_def["title"]),
+			str(mode_def["icon"]),
+			str(mode_def["size_text"]),
+			int(mode_def["grid_divisions"]),
+			int(mode_def["grid_size"]),
+			str(mode_def["initial_category"])
+		)
+		var card_btn := card_result["button"] as Button
+		var badge := card_result["badge"] as MiniGridBadge
+		_mode_cards.append(card_btn)
+		_mode_badges.append(badge)
+		cards_row.add_child(card_btn)
+		match mode_id:
+			"character":
+				_character_card = card_btn
+				_character_badge = badge
+			"animal":
+				_animal_card = card_btn
+			"vehicle":
+				_vehicle_card = card_btn
+			"scenery":
+				_scenery_card = card_btn
+				_scenery_badge = badge
+				_scenery_size_label = card_result["size_label"] as Label
 
 	var world_holder := CenterContainer.new()
 	world_holder.name = "WorldSelectorHolder"
@@ -206,6 +272,21 @@ func get_active_theme_id() -> String:
 	return _active_theme_id
 
 
+func get_selected_mode_id() -> String:
+	return _selected_mode_id
+
+
+func get_selected_initial_category() -> String:
+	return _selected_initial_category
+
+
+static func get_initial_category_for_mode(mode_id: String) -> String:
+	for mode_def: Dictionary in MODE_DEFINITIONS:
+		if str(mode_def["mode_id"]) == mode_id:
+			return str(mode_def["initial_category"])
+	return "basic"
+
+
 func set_active_theme(theme_id: String, animate: bool = true) -> void:
 	ensure_setup()
 	if not WORLD_THEMES.has(theme_id):
@@ -218,18 +299,20 @@ func set_active_theme(theme_id: String, animate: bool = true) -> void:
 
 
 func _create_mode_card(
+	mode_id: String,
 	node_name: String,
 	title_pt: String,
 	icon_name: String,
 	size_text: String,
 	grid_divisions: int,
-	grid_size: int
+	grid_size: int,
+	initial_category: String
 ) -> Dictionary:
 	var btn := Button.new()
 	btn.name = node_name
 	btn.text = ""
 	btn.tooltip_text = "%s (%s)" % [title_pt, size_text]
-	btn.custom_minimum_size = Vector2(240.0, 260.0)
+	btn.custom_minimum_size = Vector2(184.0, 212.0)
 	btn.mouse_filter = Control.MOUSE_FILTER_STOP
 	btn.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	btn.pivot_offset = btn.custom_minimum_size * 0.5
@@ -237,7 +320,7 @@ func _create_mode_card(
 	var vbox := VBoxContainer.new()
 	vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 12)
+	vbox.add_theme_constant_override("separation", 8)
 	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(vbox)
 
@@ -247,7 +330,7 @@ func _create_mode_card(
 
 	var icon_rect := TextureRect.new()
 	icon_rect.texture = UiIconDrawer.get_icon_texture(icon_name)
-	icon_rect.custom_minimum_size = Vector2(128.0, 128.0)
+	icon_rect.custom_minimum_size = Vector2(96.0, 96.0)
 	icon_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -256,7 +339,7 @@ func _create_mode_card(
 	var title_label := Label.new()
 	title_label.text = title_pt
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title_label.add_theme_font_size_override("font_size", 24)
+	title_label.add_theme_font_size_override("font_size", 22)
 	title_label.add_theme_color_override("font_color", Color(0.20, 0.22, 0.28))
 	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	vbox.add_child(title_label)
@@ -298,8 +381,11 @@ func _create_mode_card(
 	badge_row.add_child(size_label)
 
 	btn.pressed.connect(func() -> void:
-		var resolved_size: int = 32 if (node_name == "SceneryCard" and _active_theme_id == "voxel") else grid_size
+		var resolved_size: int = 32 if (mode_id == "scenery" and _active_theme_id == "voxel") else grid_size
+		_selected_mode_id = mode_id
+		_selected_initial_category = initial_category
 		_play_theme_transition_curtain(_active_theme_id, 0.85, 0.72)
+		mode_started.emit(mode_id, resolved_size, _active_theme_id, initial_category)
 		start_new_project_requested.emit(resolved_size, _active_theme_id)
 		project_started.emit(resolved_size, _active_theme_id)
 	)
@@ -453,7 +539,7 @@ func _apply_theme_visuals(theme_id: String, animate: bool) -> void:
 			_bg_tex_a.modulate.a = 0.0
 			_bg_tex_b.modulate.a = 0.0
 
-	for card: Button in [_character_card, _scenery_card]:
+	for card: Button in _mode_cards:
 		if card == null:
 			continue
 		card.add_theme_stylebox_override("normal", _make_tactile_style(card_bg, card_border, 30, 10))
@@ -461,9 +547,10 @@ func _apply_theme_visuals(theme_id: String, animate: bool) -> void:
 		card.add_theme_stylebox_override("pressed", _make_tactile_style(card_bg.darkened(0.04), card_border.darkened(0.15), 30, 5))
 		card.add_theme_stylebox_override("focus", _make_tactile_style(card_bg, card_accent, 30, 10))
 
-	if _character_badge != null:
-		_character_badge.accent_color = card_accent
-		_character_badge.queue_redraw()
+	for badge: MiniGridBadge in _mode_badges:
+		if badge != null:
+			badge.accent_color = card_accent
+			badge.queue_redraw()
 	if _scenery_badge != null:
 		_scenery_badge.accent_color = card_accent
 		_scenery_badge.grid_divisions = 7 if theme_id == "voxel" else 5
@@ -540,7 +627,7 @@ func _play_card_pulse() -> void:
 	_pulse_tween.set_parallel(true)
 	_pulse_tween.set_trans(Tween.TRANS_BACK)
 	_pulse_tween.set_ease(Tween.EASE_OUT)
-	for card: Button in [_character_card, _scenery_card]:
+	for card: Button in _mode_cards:
 		if card == null:
 			continue
 		card.scale = Vector2(0.96, 0.96)
