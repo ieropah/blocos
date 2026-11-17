@@ -4,14 +4,19 @@ extends RefCounted
 ## recoloring, and removal.
 
 
+static var place_duration: float = 0.15
+static var place_overshoot_xz: float = 1.2
+static var place_squash_y: float = 0.75
+
+
 static func play_place_tween(node: Node3D) -> void:
 	if node == null or not is_instance_valid(node) or not node.is_inside_tree():
 		return
-	node.scale = Vector3(1.2, 0.75, 1.2)
+	node.scale = Vector3(place_overshoot_xz, place_squash_y, place_overshoot_xz)
 	var tween := node.create_tween()
 	tween.set_trans(Tween.TRANS_BACK)
 	tween.set_ease(Tween.EASE_OUT)
-	tween.tween_property(node, "scale", Vector3.ONE, 0.15)
+	tween.tween_property(node, "scale", Vector3.ONE, place_duration)
 
 
 static func play_paint_tween(node: Node3D) -> void:

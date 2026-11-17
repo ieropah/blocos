@@ -26,6 +26,7 @@ signal tool_selected(tool_name: String)
 signal studio_bg_changed(bg_color: Color)
 
 const CameraController = preload("res://scripts/controllers/camera_controller.gd")
+const DevTuningPanel = preload("res://scripts/ui/dev_tuning_panel.gd")
 const ThemeVisuals = preload("res://scripts/visuals/theme_visuals.gd")
 const UiIconDrawer = preload("res://scripts/visuals/ui_icon_drawer.gd")
 
@@ -173,6 +174,15 @@ var _palette_container: PanelContainer = null
 var _studio_bg_button: Button = null
 var _studio_bg_divider: ColorRect = null
 var _studio_bg_index: int = 0
+var _studio_bg_colors: Array[Color] = STUDIO_BG_COLORS.duplicate()
+var _runtime_color_options: Array[Dictionary] = []
+var _toolbar_area: MarginContainer = null
+var _dev_tuning_panel: DevTuningPanel = null
+var _tray_width_px: float = TRAY_WIDTH_PX
+var _tray_card_height_px: float = 108.0
+var _right_button_size_px: float = 96.0
+var _palette_height_px: float = PALETTE_HEIGHT_PX
+var _icon_padding_px: float = 14.0
 var _cards_box: GridContainer = null
 var _top_bar_panel: PanelContainer = null
 var _gallery_button: Button = null
@@ -219,6 +229,10 @@ func ensure_setup() -> void:
 	if _root != null and is_instance_valid(_root):
 		return
 
+	if _runtime_color_options.is_empty():
+		for entry: Dictionary in COLOR_OPTIONS:
+			_runtime_color_options.append(entry.duplicate())
+
 	_root = Control.new()
 	_root.name = "UIRoot"
 	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -227,6 +241,9 @@ func ensure_setup() -> void:
 
 	_build_tray_panel(_root)
 	_build_toolbar_panel(_root)
+	_dev_tuning_panel = DevTuningPanel.new()
+	_root.add_child(_dev_tuning_panel)
+	_dev_tuning_panel.bind(self)
 	home_pressed.connect(func() -> void: home_requested.emit())
 
 
@@ -334,14 +351,16 @@ func set_active_theme(theme_id: String, catalog_pieces: Array = [], grid_size: i
 	if _studio_bg_divider != null and is_instance_valid(_studio_bg_divider):
 		_studio_bg_divider.visible = (_active_theme_id == "solid")
 	if _active_theme_id == "solid":
-		_apply_studio_bg_to_platform(STUDIO_BG_COLORS[_studio_bg_index])
+		_apply_studio_bg_to_platform(_studio_bg_colors[_studio_bg_index])
 
 
 func _rebuild_tray_cards() -> void:
 	var filtered_pieces: Array[Dictionary] = []
 	for piece: Dictionary in _cached_catalog_pieces:
-		if str(piece.get("category", "basic")) == _active_category:
+		if _active_theme_id == "solid" or str(piece.get("category", "basic")) == _active_category:
 			filtered_pieces.append(piece)
+	if filtered_pieces.is_empty():
+		filtered_pieces = _cached_catalog_pieces.duplicate()
 
 	if _cards_box != null and is_instance_valid(_cards_box):
 		for child: Node in _cards_box.get_children():
@@ -420,6 +439,8 @@ func bind_camera_controller(controller: CameraController) -> void:
 		return
 
 	_bound_controller = controller
+	if _dev_tuning_panel != null and is_instance_valid(_dev_tuning_panel):
+		_dev_tuning_panel.sync_camera_controller(controller)
 	var bindings: Array[Dictionary] = [
 		{"signal": rotate_left_pressed, "callable": controller.rotate_step.bind(-1)},
 		{"signal": rotate_right_pressed, "callable": controller.rotate_step.bind(1)},
@@ -499,7 +520,7 @@ func select_color(color_id_or_color: Variant) -> void:
 
 	if color_id_or_color is String:
 		var requested_id: String = color_id_or_color as String
-		for entry: Dictionary in COLOR_OPTIONS:
+		for entry: Dictionary in _runtime_color_options:
 			if str(entry["id"]) == requested_id:
 				matched_id = requested_id
 				matched_color = entry["color"] as Color
@@ -509,7 +530,7 @@ func select_color(color_id_or_color: Variant) -> void:
 	elif color_id_or_color is Color:
 		var requested_color: Color = color_id_or_color as Color
 		matched_color = requested_color
-		for entry: Dictionary in COLOR_OPTIONS:
+		for entry: Dictionary in _runtime_color_options:
 			var entry_color: Color = entry["color"] as Color
 			if (
 				absf(entry_color.r - requested_color.r) <= 0.01
@@ -620,6 +641,13 @@ func get_gallery_button() -> Button:
 ## Returns true if the given screen coordinate lies over any interactive HUD panel.
 func is_screen_point_over_ui(screen_pos: Vector2) -> bool:
 	ensure_setup()
+	if (
+		_dev_tuning_panel != null
+		and is_instance_valid(_dev_tuning_panel)
+		and _dev_tuning_panel.visible
+		and _dev_tuning_panel.get_global_rect().has_point(screen_pos)
+	):
+		return true
 	if is_screen_point_in_tray(screen_pos):
 		return true
 	if (
@@ -910,8 +938,10 @@ func _create_preview_card(piece: Dictionary) -> PanelContainer:
 	var piece_id: String = piece["id"]
 	var piece_name: String = piece["name"]
 
+	var card_w: float = maxf(_tray_width_px - 36.0, 72.0)
+	var icon_side: float = maxf(minf(card_w, _tray_card_height_px) - _icon_padding_px * 2.0, 28.0)
 	card.name = piece_name.replace(" ", "") + "Card"
-	card.custom_minimum_size = Vector2(124.0, 108.0)
+	card.custom_minimum_size = Vector2(card_w, _tray_card_height_px)
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
 	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -925,7 +955,9 @@ func _create_preview_card(piece: Dictionary) -> PanelContainer:
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(row)
 
-	var png_path: String = "res://assets/icons/%s.png" % piece_id
+	var png_path: String = PieceCatalog.get_piece_icon_path(piece_id)
+	if png_path.is_empty() or not ResourceLoader.exists(png_path):
+		png_path = "res://assets/icons/%s.png" % piece_id
 	if ResourceLoader.exists(png_path):
 		var png_tex := load(png_path) as Texture2D
 		if png_tex != null:
@@ -934,7 +966,7 @@ func _create_preview_card(piece: Dictionary) -> PanelContainer:
 			tex_icon.texture = png_tex
 			tex_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 			tex_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			tex_icon.custom_minimum_size = Vector2(84.0, 84.0)
+			tex_icon.custom_minimum_size = Vector2(icon_side, icon_side)
 			tex_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			row.add_child(tex_icon)
 			return card
@@ -944,7 +976,7 @@ func _create_preview_card(piece: Dictionary) -> PanelContainer:
 	icon.shape_id = piece_id
 	icon.fill_color = _selected_color
 	icon.active_theme_id = _active_theme_id
-	icon.custom_minimum_size = Vector2(84.0, 84.0)
+	icon.custom_minimum_size = Vector2(icon_side, icon_side)
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(icon)
 	_shape_icons[piece_id] = icon
@@ -1007,6 +1039,7 @@ func _refresh_shape_icons() -> void:
 func _build_toolbar_panel(parent: Control) -> void:
 	var toolbar_area := MarginContainer.new()
 	toolbar_area.name = "ToolbarArea"
+	_toolbar_area = toolbar_area
 	toolbar_area.anchor_left = 0.0
 	toolbar_area.anchor_top = 0.0
 	toolbar_area.anchor_right = 1.0
@@ -1079,7 +1112,7 @@ func _build_toolbar_panel(parent: Control) -> void:
 	color_row.add_child(_studio_bg_divider)
 
 	_color_buttons.clear()
-	for entry: Dictionary in COLOR_OPTIONS:
+	for entry: Dictionary in _runtime_color_options:
 		var color_id: String = str(entry["id"])
 		var color_name: String = str(entry["name"])
 		var swatch_color: Color = entry["color"] as Color
@@ -1424,8 +1457,8 @@ func _create_studio_bg_button() -> Button:
 func _update_studio_bg_button_visual() -> void:
 	if _studio_bg_button == null or not is_instance_valid(_studio_bg_button):
 		return
-	var next_idx: int = (_studio_bg_index + 1) % STUDIO_BG_COLORS.size()
-	var preview_col: Color = STUDIO_BG_COLORS[next_idx]
+	var next_idx: int = (_studio_bg_index + 1) % _studio_bg_colors.size()
+	var preview_col: Color = _studio_bg_colors[next_idx]
 	var normal_style := _make_toy_button_style(preview_col, Color("#FFFFFF"), false, 3)
 	normal_style.set_corner_radius_all(16)
 	var hover_style := _make_toy_button_style(preview_col.lightened(0.06), Color("#FFBE0B"), false, 3)
@@ -1441,11 +1474,107 @@ func _update_studio_bg_button_visual() -> void:
 
 
 func _on_studio_bg_button_pressed() -> void:
-	_studio_bg_index = (_studio_bg_index + 1) % STUDIO_BG_COLORS.size()
-	var bg_color: Color = STUDIO_BG_COLORS[_studio_bg_index]
+	_studio_bg_index = (_studio_bg_index + 1) % _studio_bg_colors.size()
+	var bg_color: Color = _studio_bg_colors[_studio_bg_index]
 	_update_studio_bg_button_visual()
 	_apply_studio_bg_to_platform(bg_color)
 	studio_bg_changed.emit(bg_color)
+
+
+func set_studio_bg_preset(index: int, color: Color, apply_immediately: bool = true) -> void:
+	ensure_setup()
+	if index < 0 or index >= _studio_bg_colors.size():
+		return
+	_studio_bg_colors[index] = color
+	_update_studio_bg_button_visual()
+	if apply_immediately:
+		_studio_bg_index = index
+		_apply_studio_bg_to_platform(color)
+		studio_bg_changed.emit(color)
+
+
+func set_palette_color(index: int, color: Color) -> void:
+	ensure_setup()
+	if index < 0 or index >= _runtime_color_options.size():
+		return
+	_runtime_color_options[index]["color"] = color
+	var color_id: String = str(_runtime_color_options[index]["id"])
+	if _color_buttons.has(color_id):
+		var btn := _color_buttons[color_id] as GlossyColorDot
+		if btn != null and is_instance_valid(btn):
+			btn.swatch_color = color
+			btn.set_meta("swatch_color", color)
+			btn.queue_redraw()
+	if _selected_color_id == color_id:
+		_selected_color = color
+		_refresh_shape_icons()
+		if _paint_tool_icon != null and is_instance_valid(_paint_tool_icon):
+			_paint_tool_icon.texture = UiIconDrawer.get_icon_texture("paint", _selected_color)
+		color_selected.emit(_selected_color_id, _selected_color)
+
+
+func apply_hud_tuning(
+	tray_width: float,
+	card_height: float,
+	right_btn_size: float,
+	palette_height: float,
+	icon_padding: float
+) -> void:
+	ensure_setup()
+	_tray_width_px = tray_width
+	_tray_card_height_px = card_height
+	_right_button_size_px = right_btn_size
+	_palette_height_px = palette_height
+	_icon_padding_px = icon_padding
+
+	if _tray_panel != null and is_instance_valid(_tray_panel):
+		_tray_panel.custom_minimum_size.x = tray_width
+	if _drawer_assembly != null and is_instance_valid(_drawer_assembly):
+		_drawer_assembly.offset_right = 16.0 + tray_width + 72.0
+	if _toolbar_area != null and is_instance_valid(_toolbar_area):
+		_toolbar_area.offset_left = 16.0 + tray_width + 72.0
+
+	var card_w: float = maxf(tray_width - 36.0, 72.0)
+	for card_var: Variant in _tray_cards.values():
+		var card := card_var as PanelContainer
+		if card != null and is_instance_valid(card):
+			card.custom_minimum_size = Vector2(card_w, card_height)
+
+	var shape_icon_side: float = maxf(minf(card_w, card_height) - icon_padding * 2.0, 28.0)
+	for icon_var: Variant in _shape_icons.values():
+		var icon := icon_var as Control
+		if icon != null and is_instance_valid(icon):
+			icon.custom_minimum_size = Vector2(shape_icon_side, shape_icon_side)
+
+	var right_sz := Vector2(right_btn_size, right_btn_size)
+	for btn_var: Variant in _tool_buttons.values():
+		var btn := btn_var as Button
+		if btn != null and is_instance_valid(btn):
+			btn.custom_minimum_size = right_sz
+			btn.pivot_offset = right_sz * 0.5
+	for btn_var: Variant in _editing_buttons.values():
+		var btn := btn_var as Button
+		if btn != null and is_instance_valid(btn):
+			btn.custom_minimum_size = right_sz
+			btn.pivot_offset = right_sz * 0.5
+
+	var hud_icon_side: float = maxf(right_btn_size - icon_padding * 2.0, 24.0)
+	for key_var: Variant in _button_icons.keys():
+		var key: String = str(key_var)
+		var hud_icon := _button_icons[key] as Control
+		if hud_icon == null or not is_instance_valid(hud_icon):
+			continue
+		if key == "StudioBgButton":
+			var bg_icon_side: float = maxf(palette_height - icon_padding * 2.0, 20.0)
+			hud_icon.custom_minimum_size = Vector2(bg_icon_side, bg_icon_side)
+		else:
+			hud_icon.custom_minimum_size = Vector2(hud_icon_side, hud_icon_side)
+
+	if _palette_container != null and is_instance_valid(_palette_container):
+		_palette_container.custom_minimum_size.y = palette_height
+	if _studio_bg_button != null and is_instance_valid(_studio_bg_button):
+		var bg_btn_side: float = maxf(palette_height - 16.0, 40.0)
+		_studio_bg_button.custom_minimum_size = Vector2(bg_btn_side, bg_btn_side)
 
 
 func _apply_studio_bg_to_platform(bg_color: Color) -> void:

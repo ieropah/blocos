@@ -20,6 +20,7 @@ const MIN_PINCH_DISTANCE_PX := 2.0
 @export var near_clip: float = 0.1
 @export var far_clip: float = 100.0
 @export var smoothing_speed: float = 12.0
+@export var orbit_sensitivity: float = 1.0
 @export var tray_width_ratio: float = 0.07
 @export var mouse_wheel_zoom_step: float = 0.9
 @export var button_zoom_step: float = 1.25
@@ -166,6 +167,14 @@ func adapt_to_grid_size(size: int) -> void:
 
 func set_grid_size(size: int) -> void:
 	adapt_to_grid_size(size)
+
+
+func apply_tuning(p_orbit_sensitivity: float, p_min_size: float, p_max_size: float, p_smoothing_speed: float) -> void:
+	orbit_sensitivity = maxf(p_orbit_sensitivity, 0.1)
+	min_size = maxf(p_min_size, 1.0)
+	max_size = maxf(p_max_size, min_size + 1.0)
+	smoothing_speed = maxf(p_smoothing_speed, 1.0)
+	_target_ortho_size = clampf(_target_ortho_size, min_size, max_size)
 
 
 ## Immediately snaps pivot transform, camera size, and lateral offset to current targets.

@@ -34,6 +34,7 @@ var _floor_mat: StandardMaterial3D = null
 var _board_mat: StandardMaterial3D = null
 var _dot_mat: StandardMaterial3D = null
 var _floor_instance: MeshInstance3D = null
+var _board_instance: MeshInstance3D = null
 var _dots_mmi: MultiMeshInstance3D = null
 var _mode_stage_root: Node3D = null
 var _voxel_world_root: Node3D = null
@@ -189,13 +190,13 @@ func build_platform(board_size: int = _DEFAULT_VISUAL_GRID_SIZE) -> void:
 	_board_mat.metallic = 0.0
 	_board_mat.metallic_specular = 0.06
 
-	var board_instance := MeshInstance3D.new()
-	board_instance.name = "BoardSurface"
-	board_instance.mesh = board_mesh
-	board_instance.material_override = _board_mat
-	board_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	board_instance.position = Vector3(0.0, 0.001, 0.0)
-	add_child(board_instance)
+	_board_instance = MeshInstance3D.new()
+	_board_instance.name = "BoardSurface"
+	_board_instance.mesh = board_mesh
+	_board_instance.material_override = _board_mat
+	_board_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_board_instance.position = Vector3(0.0, 0.001, 0.0)
+	add_child(_board_instance)
 
 	var collider_body := StaticBody3D.new()
 	collider_body.name = "BoardCollider"
@@ -338,6 +339,8 @@ func _apply_theme_materials() -> void:
 
 	if _dots_mmi != null and is_instance_valid(_dots_mmi):
 		_dots_mmi.visible = not is_voxel
+	if _board_instance != null and is_instance_valid(_board_instance):
+		_board_instance.visible = not is_solid
 	if _mode_stage_root != null and is_instance_valid(_mode_stage_root):
 		_mode_stage_root.visible = not is_solid
 	if is_voxel:
@@ -356,7 +359,7 @@ func _rebuild_mode_stage() -> void:
 	_mode_stage_root = null
 
 	var mode: String = _resolve_effective_mode_id()
-	if mode == "scenery":
+	if current_theme_id == "solid" or mode == "scenery":
 		return
 
 	_mode_stage_root = Node3D.new()
